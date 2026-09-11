@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rio.local/schemas/transaction.schema.json",
+  "title": "Transaction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "description", "amount", "type", "status", "createdAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "amount": { "$ref": "money.schema.json#/$defs/positive" },
+    "type": { "type": "string", "enum": ["CREDIT", "DEBIT"] },
+    "status": { "type": "string", "enum": ["PENDING", "COMPLETED", "DECLINED"] },
+    "createdAt": {
+      "type": "string",
+      "description": "ISO-8601 UTC instant, e.g. 2026-09-10T18:00:00Z",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    }
+  }
+}

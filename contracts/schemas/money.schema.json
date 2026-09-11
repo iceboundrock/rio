@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rio.local/schemas/money.schema.json",
+  "title": "Money",
+  "description": "Integer amount in the currency's smallest unit (minor units), transported as a base-10 string so 64-bit values survive JavaScript.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["amount", "currency"],
+  "properties": {
+    "amount": {
+      "type": "string",
+      "description": "Base-10 integer minor units. maxLength is a coarse guard; the backend enforces the signed 64-bit range.",
+      "pattern": "^-?(0|[1-9][0-9]*)$",
+      "maxLength": 20
+    },
+    "currency": {
+      "type": "string",
+      "enum": ["CAD", "CNY", "EUR", "JPY", "USD"]
+    }
+  },
+  "$defs": {
+    "positive": {
+      "description": "Money whose amount is strictly greater than zero. Used for transaction magnitudes.",
+      "allOf": [
+        { "$ref": "#" },
+        {
+          "type": "object",
+          "properties": {
+            "amount": { "type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 19 }
+          }
+        }
+      ]
+    }
+  }
+}

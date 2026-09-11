@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rio.local/schemas/create-transaction-request.schema.json",
+  "title": "CreateTransactionRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["description", "amount", "type"],
+  "properties": {
+    "description": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "amount": { "$ref": "money.schema.json#/$defs/positive" },
+    "type": { "type": "string", "enum": ["CREDIT", "DEBIT"] }
+  }
+}
