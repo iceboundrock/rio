@@ -99,4 +99,19 @@ class TransactionRepositoryTest {
         assertEquals(SchemaInitializer.SEED.size, repository.findAll().size)
         assertEquals(SchemaInitializer.SEED.sortedByDescending { it.createdAt }, repository.findAll())
     }
+
+    @Test
+    fun `repositories sharing an executor roll back together`() {
+        assertFailsWith<java.sql.SQLException> {
+            jdbc.transaction { tx ->
+                val first = TransactionRepository(tx)
+                val second = TransactionRepository(tx)
+                first.insert(lunch)
+                assertEquals(lunch, second.findById(lunch.id))
+                second.insert(lunch.copy(id = "tx-second"))
+                second.insert(lunch) // Duplicate ID fails after both preceding writes.
+            }
+        }
+        assertEquals(emptyList(), repository.findAll())
+    }
 }

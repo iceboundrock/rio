@@ -16,7 +16,7 @@ object SchemaInitializer {
             id TEXT PRIMARY KEY,
             description TEXT NOT NULL CHECK (length(trim(description)) > 0),
             amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
-            currency TEXT NOT NULL CHECK (currency IN ('USD', 'EUR', 'JPY')),
+            currency TEXT NOT NULL CHECK (currency IN ('BRL', 'CAD', 'CNY', 'EUR', 'JPY', 'USD')),
             type TEXT NOT NULL CHECK (type IN ('CREDIT', 'DEBIT')),
             status TEXT NOT NULL CHECK (status IN ('PENDING', 'COMPLETED', 'DECLINED')),
             created_at TEXT NOT NULL

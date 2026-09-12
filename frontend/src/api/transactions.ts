@@ -1,6 +1,6 @@
 // Transaction endpoints. Pages call these and receive domain objects (bigint Money, Date timestamps).
 
-import { getJson, postJson } from "./client";
+import { ApiContractError, getJson, postJson } from "./client";
 import {
   validateCreateTransactionRequest,
   validateTransaction,
@@ -11,25 +11,32 @@ import {
 import { moneyFromJson, moneyToJson } from "../money/money";
 import type { CreateTransactionInput, Transaction } from "../types/transaction";
 
-function fromJson(json: TransactionJson): Transaction {
+function fromJson(json: TransactionJson, url: string): Transaction {
+  const createdAt = new Date(json.createdAt);
+  // Date can normalize impossible dates (e.g. February 30). Compare the calendar
+  // fields too; retain support for Instant's sub-millisecond fractional seconds.
+  if (Number.isNaN(createdAt.getTime()) || createdAt.toISOString().slice(0, 19) !== json.createdAt.slice(0, 19)) {
+    throw new ApiContractError(url, `createdAt is not a valid UTC instant: ${json.createdAt}`);
+  }
   return {
     id: json.id,
     description: json.description,
     amount: moneyFromJson(json.amount),
     type: json.type,
     status: json.status,
-    createdAt: new Date(json.createdAt),
+    createdAt,
   };
 }
 
 export async function getTransactions(): Promise<Transaction[]> {
   const response = await getJson("/api/transactions", validateTransactionListResponse);
-  return response.items.map(fromJson);
+  return response.items.map((item) => fromJson(item, "/api/transactions"));
 }
 
 export async function getTransaction(id: string): Promise<Transaction> {
-  const json = await getJson(`/api/transactions/${encodeURIComponent(id)}`, validateTransaction);
-  return fromJson(json);
+  const url = `/api/transactions/${encodeURIComponent(id)}`;
+  const json = await getJson(url, validateTransaction);
+  return fromJson(json, url);
 }
 
 export async function createTransaction(input: CreateTransactionInput): Promise<Transaction> {
@@ -42,5 +49,5 @@ export async function createTransaction(input: CreateTransactionInput): Promise<
     throw new Error(`Refusing to send a request that violates the contract: ${JSON.stringify(body)}`);
   }
   const json = await postJson("/api/transactions", body, validateTransaction);
-  return fromJson(json);
+  return fromJson(json, "/api/transactions");
 }

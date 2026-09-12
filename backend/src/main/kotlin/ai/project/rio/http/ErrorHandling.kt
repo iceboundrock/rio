@@ -5,6 +5,8 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.application.log
 import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.CannotTransformContentToTypeException
+import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import kotlinx.serialization.SerializationException
@@ -13,6 +15,7 @@ import kotlinx.serialization.SerializationException
  * Central exception -> HTTP mapping.
  *
  *   ValidationException, malformed JSON  -> 400 VALIDATION_ERROR
+ *   unsupported request content type     -> 415 VALIDATION_ERROR
  *   NotFoundException, unmatched route   -> 404 NOT_FOUND
  *   anything else                        -> 500 INTERNAL_ERROR (logged, message not exposed)
  */
@@ -27,6 +30,12 @@ fun Application.configureErrorHandling() {
         // Ktor wraps JSON parse/shape failures (missing field, wrong type) in BadRequestException.
         exception<BadRequestException> { call, e ->
             call.respond(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, describeBadRequest(e)))
+        }
+        exception<UnsupportedMediaTypeException> { call, _ ->
+            call.respond(HttpStatusCode.UnsupportedMediaType, ApiError(ApiError.VALIDATION_ERROR, "Content-Type must be application/json"))
+        }
+        exception<CannotTransformContentToTypeException> { call, _ ->
+            call.respond(HttpStatusCode.UnsupportedMediaType, ApiError(ApiError.VALIDATION_ERROR, "Content-Type must be application/json"))
         }
         exception<Throwable> { call, e ->
             call.application.log.error("Unhandled exception for ${call.request.local.method.value} ${call.request.local.uri}", e)

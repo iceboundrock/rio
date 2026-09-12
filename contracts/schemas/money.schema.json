@@ -15,7 +15,7 @@
     },
     "currency": {
       "type": "string",
-      "enum": ["CAD", "CNY", "EUR", "JPY", "USD"]
+      "enum": ["BRL", "CAD", "CNY", "EUR", "JPY", "USD"]
     }
   },
   "$defs": {

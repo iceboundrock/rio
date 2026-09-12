@@ -6,7 +6,7 @@ It exists to be understood in five minutes and extended in twenty. Read `AGENTS.
 
 ## Quick start
 
-Prerequisites: JDK 25 (the Gradle toolchain pins 25), Node 20+ (with npm). No Docker, no external database.
+Prerequisites: JDK 25 (the Gradle toolchain pins 25), Node `^20.19.0 || >=22.12.0` (with npm). No Docker, no external database.
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both
@@ -63,7 +63,7 @@ features/              one Markdown spec per interview feature
 |--------|---------------------------|---------|-------------------------|
 | GET    | `/api/transactions`       | 200 `{ "items": [Transaction] }` | — |
 | GET    | `/api/transactions/{id}`  | 200 `Transaction`                | 404 |
-| POST   | `/api/transactions`       | 201 `Transaction`                | 400 |
+| POST   | `/api/transactions`       | 201 `Transaction`                | 400, 415 |
 
 ```json
 // Transaction
@@ -85,6 +85,14 @@ features/              one Markdown spec per interview feature
 
 `amount.amount` is a base-10 integer string in minor units (`"1800"` = USD 18.00, `"1800"` = JPY 1800).
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
+
+POST requires `Content-Type: application/json`; missing or unsupported content types return 415
+with `VALIDATION_ERROR`. Malformed JSON returns 400 with the same error shape.
+
+Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, database, and UI.
+If an existing local database predates this currency set, stop the backend and delete
+`backend/data/rio.db` (or your configured `RIO_DB_PATH`) before restarting. This resets local
+transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
 
 ## How a request flows
 
@@ -130,7 +138,7 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
  currency TEXT
 ```
 
-- `Currency` carries precision: USD 2, EUR 2, JPY 0. Nothing hardcodes `/ 100`.
+- `Currency` carries precision: BRL/CAD/CNY/EUR/USD 2, JPY 0. Nothing hardcodes `/ 100`.
 - Backend `Money(amount: Long, currency)` supports `+`, `-`, `compareTo`, `sumMoney()`, `split(n)`,
   `allocate(weights)`, and `multiply(Ratio, MoneyRounding)`. Every binary op checks currency;
   every op uses checked arithmetic; split/allocate never lose a minor unit.
@@ -144,7 +152,7 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | Choice | Why |
 |---|---|
 | SQLite file, no external DB | Zero setup; tests use temp files; restarts keep data. |
-| Plain JDBC + 90-line `JdbcTemplate` | SQL stays visible; real transactions; nothing to learn. |
+| Plain JDBC + explicit `JdbcTemplate` / `JdbcExecutor` | SQL stays visible; standalone and transaction-scoped operations share a small API. |
 | `Money` value type, not `Long amount` + `String currency` | Currency can't be dropped or mixed by accident. |
 | Integer minor units, never floating point | Exactness. `0.1 + 0.2` is not a thing here. |
 | JSON amounts as integer *strings* | JS `number` can't hold all 64-bit values; strings can. |
@@ -152,6 +160,32 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | Hand-written DTOs and TS wire types | No code generation step; the schema tests catch drift. |
 | Shared JSON Schema, validated on both sides | One contract, executable in backend tests and at frontend runtime. |
 | Thin layers, no interfaces-with-one-impl, no DI | Small enough to hold in your head. |
+
+## JDBC: baseline and optional operations
+
+Start with `query` (list), `queryOne` (row or null), and `update` (write/DDL).
+`TransactionRepository` uses these three operations and owns all SQL and row mapping.
+`JdbcTemplate` opens a connection per standalone operation. `JdbcExecutor` is also implemented
+by the transaction-scoped executor, which reuses one connection for the entire callback.
+
+Services receive `JdbcTemplate` so they can own atomic write boundaries. For example:
+
+```kotlin
+jdbc.transaction { tx ->
+    val repository = TransactionRepository(tx)
+    repository.insert(firstTransaction)
+    repository.insert(secondTransaction)
+}
+```
+
+Every repository participating in that write must be constructed with `tx`. A failure rolls
+back all statements; success commits them together. Keep SQL in repositories and validation
+in services. Nested transactions are outside the starter scope.
+
+Optional operations are `queryForObject` (exactly one row), `extract` (consume a ResultSet),
+`batchUpdate` (atomic standalone batch or part of its surrounding transaction), and `execute`
+(parameterless DDL). Optional `StatementSettings` configure timeout, row cap, and fetch-size
+hints. Defaults leave driver settings untouched; ordinary features need only the baseline API.
 
 ## Not implemented on purpose
 
