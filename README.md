@@ -93,6 +93,10 @@ Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, databa
 If an existing local database predates this currency set, stop the backend and delete
 `backend/data/rio.db` (or your configured `RIO_DB_PATH`) before restarting. This resets local
 transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
+Startup checks the stored table DDL against the current definition and stops with reset instructions
+if they differ, before serving requests. The check normalizes SQLite's `CREATE TABLE` prefix and
+trailing whitespace/semicolon, but compares the column/constraint body exactly. This is not SQL
+semantic equivalence: manually reformatted bodies or modified definitions also require a reset.
 
 ## How a request flows
 
@@ -168,7 +172,10 @@ Start with `query` (list), `queryOne` (row or null), and `update` (write/DDL).
 `JdbcTemplate` opens a connection per standalone operation. `JdbcExecutor` is also implemented
 by the transaction-scoped executor, which reuses one connection for the entire callback.
 
-Services receive `JdbcTemplate` so they can own atomic write boundaries. For example:
+Single-statement writes use the repository directly; SQLite already makes each statement atomic.
+`TransactionService` receives a `TransactionRepository`, which can also be bound to an outer
+transaction's executor. A future service owning multi-statement writes can receive `JdbcTemplate`
+and construct every participating repository from `tx`. For example:
 
 ```kotlin
 jdbc.transaction { tx ->

@@ -5,6 +5,7 @@ import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
 import ai.project.rio.db.Database
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.module
+import ai.project.rio.money.Currency
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -12,7 +13,11 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.HttpHeaders
+import io.ktor.http.content.OutgoingContent
 import io.ktor.http.contentType
+import io.ktor.server.application.createApplicationPlugin
+import io.ktor.server.application.install
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.nio.file.Files
@@ -63,7 +68,7 @@ class TransactionRoutesTest {
     // ---- Cross-layer currency and media-type contracts ----
     @Test
     fun `every supported currency persists and satisfies the contract`() = withApp {
-        for (currency in ai.project.rio.money.Currency.entries) {
+        for (currency in Currency.entries) {
             val request = """{"description":"Currency test","amount":{"amount":"9223372036854775807","currency":"${currency.code}"},"type":"CREDIT"}"""
             assertMatchesSchema(request, "create-transaction-request.schema.json")
             val response = postJson(request)
@@ -82,11 +87,21 @@ class TransactionRoutesTest {
 
     @Test
     fun `missing and unsupported content types return 415`() = withApp {
-        for (type in listOf(null, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded)) {
+        val receivedTypes = mutableListOf<String?>()
+        application {
+            install(createApplicationPlugin("CaptureContentType") {
+                onCall { call -> receivedTypes.add(call.request.headers[HttpHeaders.ContentType]) }
+            })
+        }
+        for (type in listOf(null, ContentType.Application.OctetStream, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded)) {
             val response = client.post("/api/transactions") {
-                if (type != null) contentType(type)
-                setBody(validRequest.toByteArray())
+                setBody(object : OutgoingContent.ByteArrayContent() {
+                    override val contentType: ContentType? = type
+                    override fun bytes(): ByteArray = validRequest.toByteArray()
+                })
             }
+            assertEquals(listOf(type?.toString()), receivedTypes.toList())
+            receivedTypes.clear()
             assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
             val body = response.bodyAsText()
             assertMatchesSchema(body, "api-error.schema.json")

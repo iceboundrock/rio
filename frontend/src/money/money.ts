@@ -14,9 +14,9 @@ export const CURRENCIES: Record<CurrencyCode, CurrencyInfo> = {
   BRL: { code: "BRL", precision: 2, symbol: "R$" },
   CAD: { code: "CAD", precision: 2, symbol: "CA$" },
   CNY: { code: "CNY", precision: 2, symbol: "CN¥" },
-  USD: { code: "USD", precision: 2, symbol: "$" },
   EUR: { code: "EUR", precision: 2, symbol: "€" },
   JPY: { code: "JPY", precision: 0, symbol: "¥" },
+  USD: { code: "USD", precision: 2, symbol: "$" },
 };
 
 export function isCurrencyCode(value: string): value is CurrencyCode {
