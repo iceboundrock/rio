@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs everything CI would: backend tests, frontend tests, frontend production build.
-# Requires: JDK 25, Node 20+, npm. Nothing here is needed to run the app itself.
+# Requires: JDK 25, Node ^20.19.0 or >=22.12.0, npm. Nothing here is needed to run the app itself.
 set -eu
 
 cd "$(dirname "$0")"

@@ -1,5 +1,6 @@
 package ai.project.rio.transaction
 
+import ai.project.rio.db.JdbcTemplate
 import ai.project.rio.http.NotFoundException
 import ai.project.rio.http.ValidationException
 import ai.project.rio.money.Money
@@ -9,9 +10,10 @@ import java.util.UUID
 
 /** Business rules for transactions. HTTP parsing happens before this layer; SQL happens after it. */
 class TransactionService(
-    private val repository: TransactionRepository,
+    private val jdbc: JdbcTemplate,
     private val clock: Clock = Clock.systemUTC(),
 ) {
+    private val repository = TransactionRepository(jdbc)
 
     fun list(): List<Transaction> = repository.findAll()
 
@@ -30,7 +32,9 @@ class TransactionService(
             status = TransactionStatus.COMPLETED,
             createdAt = Instant.now(clock),
         )
-        repository.insert(transaction)
+        jdbc.transaction { tx ->
+            TransactionRepository(tx).insert(transaction)
+        }
         return transaction
     }
 }

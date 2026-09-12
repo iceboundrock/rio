@@ -60,6 +60,40 @@ class TransactionRoutesTest {
 
     private val validRequest = """{"description":"Lunch","amount":{"amount":"1800","currency":"USD"},"type":"DEBIT"}"""
 
+    // ---- Cross-layer currency and media-type contracts ----
+    @Test
+    fun `every supported currency persists and satisfies the contract`() = withApp {
+        for (currency in ai.project.rio.money.Currency.entries) {
+            val request = """{"description":"Currency test","amount":{"amount":"9223372036854775807","currency":"${currency.code}"},"type":"CREDIT"}"""
+            assertMatchesSchema(request, "create-transaction-request.schema.json")
+            val response = postJson(request)
+            assertEquals(HttpStatusCode.Created, response.status)
+            val body = response.bodyAsText()
+            assertMatchesSchema(body, "transaction.schema.json")
+            val json = Json.parseToJsonElement(body).jsonObject
+            assertEquals(currency.code, json["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content)
+            assertEquals("9223372036854775807", json["amount"]!!.jsonObject["amount"]!!.jsonPrimitive.content)
+            val fetched = client.get("/api/transactions/${json["id"]!!.jsonPrimitive.content}")
+            assertEquals(HttpStatusCode.OK, fetched.status)
+            assertEquals(body, fetched.bodyAsText())
+        }
+        assertMatchesSchema(client.get("/api/transactions").bodyAsText(), "transaction-list-response.schema.json")
+    }
+
+    @Test
+    fun `missing and unsupported content types return 415`() = withApp {
+        for (type in listOf(null, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded)) {
+            val response = client.post("/api/transactions") {
+                if (type != null) contentType(type)
+                setBody(validRequest.toByteArray())
+            }
+            assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+            val body = response.bodyAsText()
+            assertMatchesSchema(body, "api-error.schema.json")
+            assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
+        }
+    }
+
     // ---- GET list ----
 
     @Test
