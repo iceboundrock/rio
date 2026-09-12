@@ -37,6 +37,8 @@ object JsonSchemaAssertions {
 
     private val cache = HashMap<String, Schema>()
 
+    fun readSchema(fileName: String): String = Files.readString(schemasDir.resolve(fileName))
+
     private fun schema(fileName: String): Schema = cache.getOrPut(fileName) {
         registry.getSchema(SchemaLocation.of(SCHEMA_ID_PREFIX + fileName))
     }

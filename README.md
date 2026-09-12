@@ -88,6 +88,8 @@ Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `
 
 POST requires `Content-Type: application/json`; missing or unsupported content types return 415
 with `VALIDATION_ERROR`. Malformed JSON returns 400 with the same error shape.
+Media-type matching is case-insensitive and accepts parameters such as `charset=utf-8`;
+structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
 Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, database, and UI.
 If an existing local database predates this currency set, stop the backend and delete
