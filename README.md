@@ -65,6 +65,8 @@ features/              one Markdown spec per interview feature
 | GET    | `/api/transactions/{id}`  | 200 `Transaction`                | 404 |
 | POST   | `/api/transactions`       | 201 `Transaction`                | 400, 415 |
 
+Any path also answers 405 for a method it does not route and 406 for an unsatisfiable `Accept`.
+
 ```json
 // Transaction
 {
@@ -89,12 +91,17 @@ Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the transaction POST handler advertise `Accept-Post: application/json`.
 A malformed `Content-Type` header returns 400 with `malformed Content-Type header`.
-Missing required JSON fields return 400 naming the DTO fields; other malformed JSON or invalid JSON shapes
-return 400 with `malformed request body`. Validation errors describe constraints without echoing request values.
+Missing required JSON fields return 400 naming the DTO fields, qualified by their JSON path when the
+field belongs to a nested object (`amount.currency`); other malformed JSON or invalid JSON shapes
+return 400 with `malformed request body`. Validation error *responses* describe constraints without
+echoing request values; server logs are not redacted and still record the full request line.
 A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.
-Error responses are explicitly serialized as JSON regardless of `Accept`; successful responses still negotiate
-and an incompatible `Accept` can produce an empty 406. Unsupported media types return 415 without WARN logs;
-failure to transform a type explicitly accepted by the route returns 500 `INTERNAL_ERROR` and logs a server warning.
+Error responses are explicitly serialized as JSON regardless of `Accept`, including the statuses the
+framework raises on its own: an unroutable method returns 405 `method not allowed`, and a successful
+response that no acceptable media type can represent returns 406 `no acceptable response media type`
+*after* the route has run — for POST the transaction is written and the caller cannot see it (#13).
+Unsupported media types return 415 without WARN logs; failure to transform a type explicitly accepted
+by the route returns 500 `INTERNAL_ERROR` and logs a server warning.
 Media-type matching is case-insensitive and accepts parameters such as `charset=utf-8`;
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
