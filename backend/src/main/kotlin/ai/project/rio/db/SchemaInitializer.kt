@@ -25,7 +25,24 @@ object SchemaInitializer {
 
     fun initialize(jdbc: JdbcTemplate) {
         jdbc.update(CREATE_TRANSACTIONS)
+        val actual = jdbc.queryOne(
+            "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
+            listOf("table", "transactions"),
+        ) { it.getString("sql") }
+        check(actual != null && canonicalDdl(actual) == canonicalDdl(CREATE_TRANSACTIONS)) {
+            "Outdated or incompatible transactions schema. Stop the backend and delete " +
+                "backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
+                "This resets local transactions to demo data; back up data you need first."
+        }
     }
+
+    // Normalize SQLite's CREATE prefix and statement terminator only. Preserve the body exactly,
+    // especially quoted literals: this is a reset-only drift guard, not SQL semantic equivalence.
+    internal fun canonicalDdl(ddl: String): String = ddl.trim().removeSuffix(";").trimEnd()
+        .replaceFirst(
+            Regex("^CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?", RegexOption.IGNORE_CASE),
+            "CREATE TABLE ",
+        )
 
     /** Inserts fixed demo rows if the table is empty. Deterministic so tests and demos match. */
     fun seedIfEmpty(jdbc: JdbcTemplate) {

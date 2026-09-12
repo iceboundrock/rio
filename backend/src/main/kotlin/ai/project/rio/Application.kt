@@ -4,6 +4,7 @@ import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.http.configureErrorHandling
+import ai.project.rio.transaction.TransactionRepository
 import ai.project.rio.transaction.TransactionService
 import ai.project.rio.transaction.transactionRoutes
 import io.ktor.serialization.kotlinx.json.json
@@ -43,7 +44,7 @@ fun Application.module(jdbc: JdbcTemplate) {
     install(CallLogging)
     configureErrorHandling()
 
-    val transactionService = TransactionService(jdbc)
+    val transactionService = TransactionService(TransactionRepository(jdbc))
 
     routing {
         transactionRoutes(transactionService)

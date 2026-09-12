@@ -7,6 +7,7 @@ import ai.project.rio.money.Currency
 import ai.project.rio.money.Money
 import java.nio.file.Files
 import java.nio.file.Path
+import java.sql.SQLException
 import java.time.Instant
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -86,10 +87,10 @@ class TransactionRepositoryTest {
 
     @Test
     fun `SQLite CHECK constraints back up application validation`() {
-        assertFailsWith<java.sql.SQLException> { repository.insert(lunch.copy(amount = Money(0, Currency.USD))) }
-        assertFailsWith<java.sql.SQLException> { repository.insert(lunch.copy(amount = Money(-5, Currency.USD))) }
-        assertFailsWith<java.sql.SQLException> { repository.insert(lunch.copy(description = "   ")) }
-        assertFailsWith<java.sql.SQLException> { repository.insert(lunch); repository.insert(lunch) } // duplicate id
+        assertFailsWith<SQLException> { repository.insert(lunch.copy(amount = Money(0, Currency.USD))) }
+        assertFailsWith<SQLException> { repository.insert(lunch.copy(amount = Money(-5, Currency.USD))) }
+        assertFailsWith<SQLException> { repository.insert(lunch.copy(description = "   ")) }
+        assertFailsWith<SQLException> { repository.insert(lunch); repository.insert(lunch) } // duplicate id
     }
 
     @Test
@@ -101,8 +102,23 @@ class TransactionRepositoryTest {
     }
 
     @Test
+    fun `service joins a caller transaction and rolls back with other repository writes`() {
+        assertFailsWith<SQLException> {
+            jdbc.transaction { tx ->
+                val scopedRepository = TransactionRepository(tx)
+                val service = TransactionService(scopedRepository)
+                val created = service.create("Lunch", lunch.amount, lunch.type)
+                assertEquals(created, service.get(created.id))
+                scopedRepository.insert(lunch)
+                scopedRepository.insert(lunch) // Roll back the service write as well.
+            }
+        }
+        assertEquals(emptyList(), repository.findAll())
+    }
+
+    @Test
     fun `repositories sharing an executor roll back together`() {
-        assertFailsWith<java.sql.SQLException> {
+        assertFailsWith<SQLException> {
             jdbc.transaction { tx ->
                 val first = TransactionRepository(tx)
                 val second = TransactionRepository(tx)
