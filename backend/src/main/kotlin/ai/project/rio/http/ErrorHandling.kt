@@ -1,7 +1,8 @@
 package ai.project.rio.http
 
-import io.ktor.http.HttpStatusCode
+import io.ktor.http.BadContentTypeFormatException
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
@@ -11,7 +12,6 @@ import io.ktor.server.plugins.CannotTransformContentToTypeException
 import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
-import kotlinx.serialization.SerializationException
 
 /**
  * Central exception -> HTTP mapping.
@@ -29,14 +29,22 @@ fun Application.configureErrorHandling() {
         exception<NotFoundException> { call, e ->
             call.respond(HttpStatusCode.NotFound, ApiError(ApiError.NOT_FOUND, e.message ?: "not found"))
         }
-        // Ktor wraps JSON parse/shape failures (missing field, wrong type) in BadRequestException.
         exception<BadRequestException> { call, e ->
-            call.respond(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, describeBadRequest(e)))
+            // ContentNegotiation wraps header parsing failures in BadRequestException.
+            // Parser diagnostics can contain request values, keys, or the entire input.
+            val message = if (generateSequence<Throwable>(e) { it.cause }.any { it is BadContentTypeFormatException }) {
+                "malformed Content-Type header"
+            } else {
+                "malformed request body"
+            }
+            call.respond(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, message))
         }
         exception<UnsupportedMediaTypeException> { call, _ ->
             call.respondUnsupportedContentType()
         }
-        exception<CannotTransformContentToTypeException> { call, _ ->
+        exception<CannotTransformContentToTypeException> { call, e ->
+            // This can also indicate missing/misconfigured receive converters, not just a bad media type.
+            call.application.log.warn("Request content transformation failed; check receive type and ContentNegotiation configuration", e)
             call.respondUnsupportedContentType()
         }
         exception<Throwable> { call, e ->
@@ -52,12 +60,7 @@ fun Application.configureErrorHandling() {
 private suspend fun ApplicationCall.respondUnsupportedContentType() {
     // Report the supplied type, not a required type that varies by route. Keep the exception
     // mappings explicit: other ContentTransformationException subtypes may represent server failures.
-    val type = request.headers[HttpHeaders.ContentType]
+    val type = request.headers[HttpHeaders.ContentType]?.takeIf { it.isNotBlank() }
     val message = if (type == null) "missing Content-Type" else "unsupported Content-Type: $type"
     respond(HttpStatusCode.UnsupportedMediaType, ApiError(ApiError.VALIDATION_ERROR, message))
-}
-
-private fun describeBadRequest(e: BadRequestException): String {
-    val cause = generateSequence<Throwable>(e) { it.cause }.firstOrNull { it is SerializationException }
-    return "malformed request body: ${cause?.message ?: e.message ?: "cannot parse JSON"}"
 }
