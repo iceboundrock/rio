@@ -16,6 +16,7 @@ import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.contentnegotiation.ContentTypeWithQuality
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.ApplicationRequest
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.MissingFieldException
@@ -36,6 +37,7 @@ import kotlinx.serialization.json.Json
  * succeeded into a 400 or a 406. Response shaping and that rejection share this file so they cannot
  * drift: every response, success or error, is application/json, so whether a request can be answered
  * at all is decided from the Accept header alone, before any route runs (see acceptsProducedType).
+ * Because of that every response varies on Accept, and says so.
  */
 @OptIn(ExperimentalSerializationApi::class)
 fun Application.configureErrorHandling() {
@@ -105,6 +107,9 @@ fun Application.configureErrorHandling() {
     // write, then fail negotiation, and the caller would read an error for a transaction that exists.
     install(createApplicationPlugin("ValidateAccept") {
         onCall { call ->
+            // Whether this call answers 200 or 406 is decided by Accept, so a cache must key on it
+            // (RFC 9110 12.5.5) or it would serve a stored JSON body to a request the server rejects.
+            call.response.header(HttpHeaders.Vary, HttpHeaders.Accept)
             if (!acceptsProducedType(call.request.acceptRanges())) throw NotAcceptableException(NO_ACCEPTABLE_RESPONSE)
         }
     })
@@ -115,14 +120,17 @@ private const val NO_ACCEPTABLE_RESPONSE = "no acceptable response media type"
 /** The only media type this API produces, for successful responses and for errors alike. */
 private val PRODUCED_TYPE = ContentType.Application.Json
 
-// RFC 9110 grammar for Accept: `#( media-range [ weight ] )` where a media-range is `token "/" token`
-// followed by `*( OWS ";" OWS [ token "=" ( token / quoted-string ) ] )` (5.6.2, 5.6.4, 5.6.6, 12.5.1)
+// RFC 9110 grammar for Accept: `#( media-range [ weight ] )` where a media-range is `*/*`, `type/*`
+// or `type/subtype` - `*` is a token character, so the wildcard type is excluded from the last form
+// explicitly, or `*/json` would read as a media range - followed by
+// `*( OWS ";" OWS [ token "=" ( token / quoted-string ) ] )` (5.6.2, 5.6.4, 5.6.6, 12.5.1)
 // and a weight is the parameter `q` with a qvalue of `0` and up to three decimals or `1` and up to
 // three zeros (12.4.2). Kotlin's `\s` is wider than OWS, which is only SP and HTAB.
 private const val OWS = """[ \t]*"""
 private const val TOKEN = """[!#$%&'*+\-.^_`|~0-9A-Za-z]+"""
 private const val QUOTED_STRING = """"(?:[^"\\]|\\.)*""""
-private val ACCEPT_ELEMENT = Regex("""($TOKEN/$TOKEN)((?:$OWS;$OWS(?:$TOKEN=(?:$TOKEN|$QUOTED_STRING))?)*)""")
+private const val MEDIA_RANGE = """\*/\*|(?!\*/)$TOKEN/$TOKEN"""
+private val ACCEPT_ELEMENT = Regex("""($MEDIA_RANGE)((?:$OWS;$OWS(?:$TOKEN=(?:$TOKEN|$QUOTED_STRING))?)*)""")
 private val ACCEPT_PARAMETER = Regex("""($TOKEN)=($TOKEN|$QUOTED_STRING)""")
 private val QVALUE = Regex("""0(\.[0-9]{0,3})?|1(\.0{0,3})?""")
 

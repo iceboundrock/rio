@@ -203,9 +203,10 @@ class TransactionRoutesTest {
      *
      * Each case is the list of Accept field lines sent: repeated lines combine in received order
      * (RFC 9110 5.2) and empty list elements are ignored (5.6.1). The parameter name `q` is
-     * case-insensitive (12.4.2). Anything outside the Accept grammar - a bare `*`, a quoted qvalue,
-     * whitespace inside a media range - is a malformed header (400), not a preference the server
-     * guesses at; a quoted-string parameter other than `q` is grammatical and may contain `,` or `;`.
+     * case-insensitive (12.4.2). Anything outside the Accept grammar - a bare `*`, a wildcard type
+     * with a concrete subtype, a quoted qvalue, whitespace inside a media range - is a malformed
+     * header (400), not a preference the server guesses at; a quoted-string parameter other than `q`
+     * is grammatical and may contain `,` or `;`. Every answer varies on Accept and says so.
      */
     @Test
     fun `an unacceptable Accept is rejected before the route runs`() = withRawServer { port ->
@@ -270,6 +271,11 @@ class TransactionRoutesTest {
             listOf("*;q=0.5"),
             listOf("text/plain, *"),
             listOf("application/json", "*"),
+            listOf("*/json"),
+            listOf("*/json;q=0"),
+            listOf("*/JSON"),
+            listOf("text/plain, */json"),
+            listOf("application/json", "*/json"),
             listOf("application/json;q=\"0.5\""),
             listOf("application/json;q=\"0\""),
             listOf("application / json"),
@@ -304,6 +310,7 @@ class TransactionRoutesTest {
                 val context = "Accept: $accept; $target; ${response.raw}"
                 assertEquals(expectedError?.first ?: success, response.status, context)
                 assertTrue(response.hasHeader("Content-Type: application/json"), context)
+                assertTrue(response.hasHeader("Vary: Accept"), context)
                 assertMatchesSchema(response.body, if (expectedError != null) "api-error.schema.json" else schema)
                 if (expectedError != null) {
                     assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
@@ -322,6 +329,7 @@ class TransactionRoutesTest {
         for (method in listOf("PUT", "DELETE", "PATCH")) {
             val response = rawRequest(port, "$method /api/transactions")
             assertEquals(405, response.status, response.raw)
+            assertTrue(response.hasHeader("Vary: Accept"), response.raw)
             assertMatchesSchema(response.body, "api-error.schema.json")
             assertEquals("method not allowed", response.message())
         }

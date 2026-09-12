@@ -131,16 +131,19 @@ The selected semantics (RFC 9110 §12.5.1):
 - `q=0` excludes; any `q` above zero accepts, since there is nothing to choose between. The parameter
   name is case-insensitive (`Q=0` excludes too).
 - The header is read against the RFC 9110 grammar, not a lenient approximation of it: a bare `*`
-  (not a media range — §12.5.1 permits `*/*`, `type/*`, `type/subtype`), spaces inside a media
-  range, a quoted qvalue (`q="0.5"`) or one outside §12.4.2 (`q=abc`, `q=2`, `q=.5`) is a malformed
-  `Accept` and returns 400 rather than a guessed preference. Quoted-string parameters other than `q`
-  are grammatical and may contain `,` or `;`.
+  or a wildcard type with a concrete subtype (`*/json`) — neither is a media range; §12.5.1 permits
+  `*/*`, `type/*`, `type/subtype` — spaces inside a media range, a quoted qvalue (`q="0.5"`) or one
+  outside §12.4.2 (`q=abc`, `q=2`, `q=.5`) is a malformed `Accept` and returns 400 rather than a
+  guessed preference. Quoted-string parameters other than `q` are grammatical and may contain `,`
+  or `;`.
 - Range parameters other than `q` are parsed but deliberately not matched, a simplification of full
   media-range parameter matching: `application/json;charset=utf-16` is treated as `application/json`,
   because the produced type carries no parameter a range could select between.
 
 The 406 body is itself the JSON `ApiError` shape even though the caller said it would not accept JSON;
-there is no empty error response anywhere in the API.
+there is no empty error response anywhere in the API. Because every outcome depends on `Accept`,
+every response carries `Vary: Accept` (§12.5.5), so a shared cache cannot reuse a stored JSON body
+for a request the server would reject.
 
 Unsupported media types return 415 without WARN logs; failure to transform a type explicitly accepted
 by the route returns 500 `INTERNAL_ERROR` and logs a server warning.
