@@ -50,15 +50,15 @@ private val INTEGER_STRING = Regex("^-?(0|[1-9][0-9]*)$")
 
 fun MoneyDto.toMoney(): Money {
     if (!INTEGER_STRING.matches(amount)) {
-        throw ValidationException("amount must be a base-10 integer string in minor units, was \"$amount\"")
+        throw ValidationException("amount must be a base-10 integer string in minor units")
     }
     val minor = amount.toLongOrNull()
-        ?: throw ValidationException("amount is out of range for a 64-bit integer: \"$amount\"")
+        ?: throw ValidationException("amount is out of range for a 64-bit integer")
     val currency = Currency.fromCode(currency)
-        ?: throw ValidationException("unsupported currency \"$currency\"; supported: ${Currency.entries.joinToString { it.code }}")
+        ?: throw ValidationException("unsupported currency; supported: ${Currency.entries.joinToString { it.code }}")
     return Money(minor, currency)
 }
 
 fun parseTransactionType(value: String): TransactionType =
     TransactionType.entries.firstOrNull { it.name == value }
-        ?: throw ValidationException("type must be one of ${TransactionType.entries.joinToString()}, was \"$value\"")
+        ?: throw ValidationException("type must be one of ${TransactionType.entries.joinToString()}")

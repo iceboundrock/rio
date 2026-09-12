@@ -87,10 +87,14 @@ features/              one Markdown spec per interview feature
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
-with `VALIDATION_ERROR`. Transaction POST responses advertise `Accept-Post: application/json`.
-A malformed `Content-Type` header returns 400 with `malformed Content-Type header`;
-malformed JSON or an invalid JSON shape returns 400 with `malformed request body`, without parser input excerpts.
-These JSON response shapes assume `Accept` allows JSON; an incompatible `Accept` can produce an empty 406.
+with `VALIDATION_ERROR`. Responses from the transaction POST handler advertise `Accept-Post: application/json`.
+A malformed `Content-Type` header returns 400 with `malformed Content-Type header`.
+Missing required JSON fields return 400 naming the DTO fields; other malformed JSON or invalid JSON shapes
+return 400 with `malformed request body`. Validation errors describe constraints without echoing request values.
+A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.
+Error responses are explicitly serialized as JSON regardless of `Accept`; successful responses still negotiate
+and an incompatible `Accept` can produce an empty 406. Unsupported media types return 415 without WARN logs;
+failure to transform a type explicitly accepted by the route returns 500 `INTERNAL_ERROR` and logs a server warning.
 Media-type matching is case-insensitive and accepts parameters such as `charset=utf-8`;
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 

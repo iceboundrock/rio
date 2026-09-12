@@ -29,6 +29,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receiveMultipart
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
@@ -91,7 +92,9 @@ class TransactionRoutesTest {
                 Triple("", 415, "missing Content-Type"),
                 Triple("   ", 415, "missing Content-Type"),
                 Triple("not a mime type", 400, "malformed Content-Type header"),
-                Triple("text/plain", 415, "unsupported Content-Type: text/plain"),
+                Triple("text/plain", 415, "unsupported Content-Type"),
+                Triple("text/" + "x".repeat(2000), 415, "unsupported Content-Type"),
+                Triple("text/plain; secret=" + "x".repeat(2000), 415, "unsupported Content-Type"),
                 Triple("Application/JSON; charset=utf-8", 201, null),
                 Triple("APPLICATION/JSON;CHARSET=UTF-8", 201, null),
                 Triple("application/json;charset=", 201, null),
@@ -127,6 +130,111 @@ class TransactionRoutesTest {
     }
 
     @Test
+    fun `raw Accept headers cannot bypass error serialization`() = runBlocking {
+        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0) {
+            module(Database.open(dbFile))
+            routing { get("/test-failure") { error("server-only-secret") } }
+        }
+        try {
+            server.start(wait = false)
+            val port = server.engine.resolvedConnectors().single().port
+            val cases = listOf(
+                Triple("GET /api/transactions", null, 200),
+                Triple("GET /api/transactions/nope", null, 404),
+                Triple("GET /api/no-route", null, 404),
+                Triple("POST /api/transactions", "text/plain", 415),
+                Triple("POST /api/transactions", "application/json", 400),
+                Triple("POST /api/transactions", "application/json", 201),
+                Triple("GET /test-failure", null, 500),
+            )
+            val repository = TransactionRepository(Database.open(dbFile))
+            for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
+                val countBefore = repository.findAll().size
+                for ((target, type, normalStatus) in cases) {
+                    val response = Socket("127.0.0.1", port).use { socket ->
+                        socket.soTimeout = 10_000
+                        val request = buildString {
+                            append("$target HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\nAccept: $accept\r\n")
+                            if (type != null) append("Content-Type: $type\r\n")
+                            val body = if (normalStatus == 201) validRequest else ""
+                            append("Content-Length: ${body.toByteArray().size}\r\n\r\n")
+                            append(body)
+                        }
+                        socket.getOutputStream().write(request.toByteArray())
+                        socket.getOutputStream().flush()
+                        socket.getInputStream().bufferedReader().readText()
+                    }
+                    val headers = response.substringBefore("\r\n\r\n")
+                    val body = response.substringAfter("\r\n\r\n")
+                    val expectedStatus = when {
+                        accept.startsWith("**") -> 400
+                        normalStatus in 200..299 && accept == "text/plain" -> 406
+                        else -> normalStatus
+                    }
+                    assertEquals(expectedStatus, headers.substringBefore("\r\n").split(" ")[1].toInt(), response)
+                    if (expectedStatus == 406) {
+                        assertEquals("", body)
+                    } else {
+                        assertTrue(headers.lowercase().contains("content-type: application/json"), response)
+                        val schema = when (expectedStatus) {
+                            200 -> "transaction-list-response.schema.json"
+                            201 -> "transaction.schema.json"
+                            else -> "api-error.schema.json"
+                        }
+                        assertMatchesSchema(body, schema)
+                        assertTrue(!body.contains("secret-marker") && !body.contains("server-only-secret"), body)
+                        if (accept.startsWith("**")) {
+                            assertEquals("malformed Accept header", Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
+                        }
+                    }
+                }
+                if (accept.startsWith("**")) assertEquals(countBefore, repository.findAll().size)
+            }
+        } finally {
+            server.stop(0, 5_000)
+        }
+    }
+
+    @Test
+    fun `ordinary unsupported media types do not log warnings`() = withApp {
+        val events = ListAppender<ILoggingEvent>().apply { start() }
+        var logger: Logger? = null
+        application {
+            logger = log as Logger
+            logger.addAppender(events)
+        }
+        try {
+            for (type in listOf(null, ContentType.Text.Plain, ContentType.parse("application/vnd.api+json"))) {
+                val response = client.post("/api/transactions") {
+                    setBody(object : OutgoingContent.ByteArrayContent() {
+                        override val contentType: ContentType? = type
+                        override fun bytes(): ByteArray = validRequest.toByteArray()
+                    })
+                }
+                assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+                assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
+            }
+            assertTrue(events.list.none { it.level.isGreaterOrEqual(Level.WARN) })
+        } finally {
+            logger?.detachAppender(events)
+            events.stop()
+        }
+    }
+
+    @Test
+    fun `missing ContentNegotiation is a server error with a JSON response`() = testApplication {
+        application {
+            configureErrorHandling()
+            routing { transactionRoutes(TransactionService(TransactionRepository(Database.open(dbFile)))) }
+        }
+        val response = postJson(validRequest)
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        val body = response.bodyAsText()
+        assertMatchesSchema(body, "api-error.schema.json")
+        assertEquals("INTERNAL_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `misconfigured receive converter produces a server warning`() = testApplication {
         val events = ListAppender<ILoggingEvent>().apply { start() }
         var logger: Logger? = null
@@ -143,8 +251,9 @@ class TransactionRoutesTest {
         }
         try {
             val response = postJson(validRequest)
-            assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+            assertEquals(HttpStatusCode.InternalServerError, response.status)
             assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
+            assertEquals("INTERNAL_ERROR", Json.parseToJsonElement(response.bodyAsText()).jsonObject["code"]!!.jsonPrimitive.content)
             assertTrue(events.list.any {
                 it.level == Level.WARN && it.formattedMessage.contains("ContentNegotiation configuration") &&
                     it.throwableProxy?.className == "io.ktor.server.plugins.CannotTransformContentToTypeException"
@@ -197,7 +306,7 @@ class TransactionRoutesTest {
             val body = response.bodyAsText()
             assertMatchesSchema(body, "api-error.schema.json")
             assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
-            val message = if (type == null) "missing Content-Type" else "unsupported Content-Type: $type"
+            val message = if (type == null) "missing Content-Type" else "unsupported Content-Type"
             assertEquals(message, Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
         }
     }
@@ -219,7 +328,7 @@ class TransactionRoutesTest {
         assertMatchesSchema(body, "api-error.schema.json")
         val error = Json.parseToJsonElement(body).jsonObject
         assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
-        assertEquals("unsupported Content-Type: application/json", error["message"]!!.jsonPrimitive.content)
+        assertEquals("unsupported Content-Type", error["message"]!!.jsonPrimitive.content)
     }
 
     // ---- GET list ----
@@ -364,7 +473,9 @@ class TransactionRoutesTest {
 
     @Test
     fun `POST missing field and unknown field are 400`() = withApp {
-        assertBadRequest("""{"description":"x","type":"DEBIT"}""", "malformed request body")
+        assertBadRequest("""{"description":"x","type":"DEBIT"}""", "missing required fields: amount")
+        assertBadRequest("""{"description":"x","amount":{"amount":"100"},"type":"DEBIT"}""", "missing required fields: currency")
+        assertBadRequest("""{"amount":{"amount":"100","currency":"USD"}}""", "missing required fields: description, type")
         assertBadRequest("""{"description":"x","amount":{"amount":"100","currency":"USD"},"type":"DEBIT","extra":1}""", "malformed request body")
     }
 
@@ -373,6 +484,30 @@ class TransactionRoutesTest {
         val response = postJson("{not json")
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
+    }
+
+    @Test
+    fun `domain conversion failures do not reflect supplied values`() = withApp {
+        val marker = "secret-marker" + "x".repeat(4000)
+        for ((request, message) in listOf(
+            validRequest.replace("1800", marker) to "amount must be a base-10 integer string in minor units",
+            validRequest.replace("1800", "9".repeat(4000)) to "amount is out of range for a 64-bit integer",
+            validRequest.replace("USD", marker) to "unsupported currency; supported: ${Currency.entries.joinToString { it.code }}",
+            validRequest.replace("DEBIT", marker) to "type must be one of CREDIT, DEBIT",
+        )) {
+            val response = postJson(request)
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            val body = response.bodyAsText()
+            assertMatchesSchema(body, "api-error.schema.json")
+            assertEquals(message, Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
+        }
+        for (path in listOf("/api/transactions/$marker", "/$marker")) {
+            val response = client.get(path)
+            assertEquals(HttpStatusCode.NotFound, response.status)
+            val body = response.bodyAsText()
+            assertMatchesSchema(body, "api-error.schema.json")
+            assertTrue(!body.contains(marker))
+        }
     }
 
     @Test
