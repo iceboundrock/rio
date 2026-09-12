@@ -4,25 +4,36 @@ import ai.project.rio.contract.JsonSchemaAssertions.assertMatchesSchema
 import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
 import ai.project.rio.db.Database
 import ai.project.rio.db.SchemaInitializer
+import ai.project.rio.http.configureErrorHandling
 import ai.project.rio.module
 import ai.project.rio.money.Currency
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
-import io.ktor.http.HttpStatusCode
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.contentType
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.install
+import io.ktor.server.application.log
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest
@@ -30,6 +41,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -67,6 +79,81 @@ class TransactionRoutesTest {
         }
 
     private val validRequest = """{"description":"Lunch","amount":{"amount":"1800","currency":"USD"},"type":"DEBIT"}"""
+
+    @Test
+    fun `raw HTTP media types preserve malformed blank and mixed case headers`() = runBlocking {
+        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0) { module(Database.open(dbFile)) }
+        try {
+            server.start(wait = false)
+            val port = server.engine.resolvedConnectors().single().port
+            val cases = listOf(
+                Triple(null, 415, "missing Content-Type"),
+                Triple("", 415, "missing Content-Type"),
+                Triple("   ", 415, "missing Content-Type"),
+                Triple("not a mime type", 400, "malformed Content-Type header"),
+                Triple("text/plain", 415, "unsupported Content-Type: text/plain"),
+                Triple("Application/JSON; charset=utf-8", 201, null),
+                Triple("APPLICATION/JSON;CHARSET=UTF-8", 201, null),
+                Triple("application/json;charset=", 201, null),
+            )
+            for ((type, status, message) in cases) {
+                // HTTP/1.0 + Connection: close avoids chunk framing; no client can normalize Content-Type.
+                val response = Socket("127.0.0.1", port).use { socket ->
+                    socket.soTimeout = 10_000
+                    val request = buildString {
+                        append("POST /api/transactions HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n")
+                        if (type != null) append("Content-Type: $type\r\n")
+                        append("Content-Length: ${validRequest.toByteArray().size}\r\n\r\n")
+                        append(validRequest)
+                    }
+                    socket.getOutputStream().write(request.toByteArray())
+                    socket.getOutputStream().flush()
+                    socket.getInputStream().bufferedReader().readText()
+                }
+                val headers = response.substringBefore("\r\n\r\n")
+                val body = response.substringAfter("\r\n\r\n")
+                assertEquals(status, headers.substringBefore("\r\n").split(" ")[1].toInt(), "Content-Type: $type; $response")
+                assertTrue(headers.lineSequence().any { it.equals("Accept-Post: application/json", ignoreCase = true) })
+                assertMatchesSchema(body, if (status == 201) "transaction.schema.json" else "api-error.schema.json")
+                if (message != null) {
+                    val error = Json.parseToJsonElement(body).jsonObject
+                    assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
+                    assertEquals(message, error["message"]!!.jsonPrimitive.content)
+                }
+            }
+        } finally {
+            server.stop(0, 5_000)
+        }
+    }
+
+    @Test
+    fun `misconfigured receive converter produces a server warning`() = testApplication {
+        val events = ListAppender<ILoggingEvent>().apply { start() }
+        var logger: Logger? = null
+        application {
+            logger = log as Logger
+            logger.addAppender(events)
+            install(ContentNegotiation) {
+                json()
+                // Valid JSON can no longer be converted to the request DTO; responses still serialize.
+                ignoreType<CreateTransactionRequest>()
+            }
+            configureErrorHandling()
+            routing { transactionRoutes(TransactionService(TransactionRepository(Database.open(dbFile)))) }
+        }
+        try {
+            val response = postJson(validRequest)
+            assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+            assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
+            assertTrue(events.list.any {
+                it.level == Level.WARN && it.formattedMessage.contains("ContentNegotiation configuration") &&
+                    it.throwableProxy?.className == "io.ktor.server.plugins.CannotTransformContentToTypeException"
+            })
+        } finally {
+            logger?.detachAppender(events)
+            events.stop()
+        }
+    }
 
     // ---- Cross-layer currency and media-type contracts ----
     @Test
@@ -106,6 +193,7 @@ class TransactionRoutesTest {
             assertEquals(listOf(type?.toString()), receivedTypes.toList())
             receivedTypes.clear()
             assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+            assertEquals("application/json", response.headers["Accept-Post"])
             val body = response.bodyAsText()
             assertMatchesSchema(body, "api-error.schema.json")
             assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
@@ -126,6 +214,7 @@ class TransactionRoutesTest {
             setBody(validRequest)
         }
         assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+        assertEquals(null, response.headers["Accept-Post"])
         val body = response.bodyAsText()
         assertMatchesSchema(body, "api-error.schema.json")
         val error = Json.parseToJsonElement(body).jsonObject
@@ -284,6 +373,21 @@ class TransactionRoutesTest {
         val response = postJson("{not json")
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
+    }
+
+    @Test
+    fun `parser failures do not echo request input or unknown keys`() = withApp {
+        for (body in listOf(
+            "password=hunter2&card=4111111111111111",
+            validRequest.dropLast(1) + " ,\"secret-hunter2\":1}",
+            validRequest.replace("\"description\":\"Lunch\"", "\"description\":{\"secret-hunter2\":1}"),
+        )) {
+            val response = postJson(body)
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            val text = response.bodyAsText()
+            assertMatchesSchema(text, "api-error.schema.json")
+            assertEquals("malformed request body", Json.parseToJsonElement(text).jsonObject["message"]!!.jsonPrimitive.content)
+        }
     }
 
     private fun kotlinx.serialization.json.JsonElement.jsonArraySize(): Int =

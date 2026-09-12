@@ -29,6 +29,7 @@ fun Route.transactionRoutes(service: TransactionService) {
         }
 
         post {
+            call.response.headers.append("Accept-Post", "application/json")
             val request = call.receive<CreateTransactionRequest>()
             val created = service.create(
                 description = request.description,

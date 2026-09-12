@@ -90,7 +90,8 @@ class SchemaInitializerTest {
         val oldDdl = storedDdl().replace("'BRL', 'CAD', 'CNY', 'EUR', 'JPY', 'USD'", "'USD', 'EUR', 'JPY'")
         jdbc.execute("DROP TABLE transactions")
         jdbc.execute(oldDdl)
-        SchemaInitializer.seedIfEmpty(jdbc)
+        // Model existing data using a currency accepted by the old schema.
+        TransactionRepository(jdbc).insert(SchemaInitializer.SEED.first())
         val before = TransactionRepository(jdbc).findAll()
 
         val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }

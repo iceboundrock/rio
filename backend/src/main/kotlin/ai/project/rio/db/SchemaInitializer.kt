@@ -30,7 +30,7 @@ object SchemaInitializer {
             listOf("table", "transactions"),
         ) { it.getString("sql") }
         check(actual != null && canonicalDdl(actual) == canonicalDdl(CREATE_TRANSACTIONS)) {
-            "Outdated or incompatible transactions schema. Stop the backend and delete " +
+            "Stored transactions schema does not match the current definition. Stop the backend and delete " +
                 "backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
                 "This resets local transactions to demo data; back up data you need first."
         }
@@ -72,5 +72,6 @@ object SchemaInitializer {
         seed("seed-0006", "Unrecognized vendor", 99_999, Currency.USD, TransactionType.DEBIT, TransactionStatus.DECLINED, "2026-09-06T22:10:00Z"),
         seed("seed-0007", "Cloud hosting", 145_000, Currency.USD, TransactionType.DEBIT, TransactionStatus.COMPLETED, "2026-09-07T00:00:00Z"),
         seed("seed-0008", "EUR invoice paid by client", 210_050, Currency.EUR, TransactionType.CREDIT, TransactionStatus.COMPLETED, "2026-09-08T16:20:00Z"),
+        seed("seed-0009", "São Paulo office supplies", 15_990, Currency.BRL, TransactionType.DEBIT, TransactionStatus.COMPLETED, "2026-09-09T14:00:00Z"),
     )
 }

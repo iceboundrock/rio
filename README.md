@@ -17,7 +17,7 @@ Or separately:
 ```bash
 # Terminal 1 — backend on http://localhost:8080
 cd backend
-./gradlew run            # creates backend/data/rio.db, seeds 8 transactions on first start
+./gradlew run            # creates backend/data/rio.db, seeds 9 transactions on first start
 
 # Terminal 2 — frontend on http://localhost:5173 (proxies /api to :8080)
 cd frontend
@@ -86,8 +86,11 @@ features/              one Markdown spec per interview feature
 `amount.amount` is a base-10 integer string in minor units (`"1800"` = USD 18.00, `"1800"` = JPY 1800).
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
 
-POST requires `Content-Type: application/json`; missing or unsupported content types return 415
-with `VALIDATION_ERROR`. Malformed JSON returns 400 with the same error shape.
+POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
+with `VALIDATION_ERROR`. Transaction POST responses advertise `Accept-Post: application/json`.
+A malformed `Content-Type` header returns 400 with `malformed Content-Type header`;
+malformed JSON or an invalid JSON shape returns 400 with `malformed request body`, without parser input excerpts.
+These JSON response shapes assume `Accept` allows JSON; an incompatible `Accept` can produce an empty 406.
 Media-type matching is case-insensitive and accepts parameters such as `charset=utf-8`;
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
