@@ -36,6 +36,22 @@ cd frontend && npm run build          # typecheck + production build
 ./verify.sh                           # all of the above, from the repo root
 ```
 
+### Continuous integration
+
+`.github/workflows/verify.yml` runs `./verify.sh` on every pull request and on pushes to
+`main`. CI runs the same script you run locally — there is no separate CI-only test sequence.
+It provisions Temurin JDK 25 and runs the script once per Node version in the supported range
+(22.x, 24.x, 26.x). No external services and no secrets: backend tests create temporary SQLite
+files. When a run fails, the backend HTML and XML test reports are uploaded as a
+`backend-test-reports-node-<version>` artifact.
+
+The matrix jobs report as `verify (node 22.x)` and friends; a single aggregate job named
+**`verify`** passes only when all of them do. Require `verify` — and only `verify` — in branch
+protection, so adding or dropping a Node version never changes the required check. That setting
+is not configurable on this repository today (GitHub restricts branch protection to public
+repositories and paid plans); once available, set it under
+*Settings → Branches → Add rule → Require status checks to pass → `verify`*.
+
 ## Where things are
 
 ```text
