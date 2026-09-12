@@ -27,17 +27,23 @@ import kotlinx.serialization.json.Json
  *   malformed Accept header              -> 400 VALIDATION_ERROR, before routing (ValidateAccept below)
  *   unsupported request content type     -> 415 VALIDATION_ERROR
  *   NotFoundException, unmatched route   -> 404 NOT_FOUND
- *   method not routed, Accept unsatisfied -> 405 / 406 VALIDATION_ERROR (framework-generated statuses)
+ *   unacceptable Accept header           -> 406 VALIDATION_ERROR, before routing (ValidateAccept below)
+ *   method not routed                    -> 405 VALIDATION_ERROR (framework-generated status)
  *   anything else                        -> 500 INTERNAL_ERROR (logged, message not exposed)
  *
  * This also installs request-side Accept validation, which can turn a request that would have
- * succeeded into a 400. Response shaping and that rejection share this file so they cannot drift.
+ * succeeded into a 400 or a 406. Response shaping and that rejection share this file so they cannot
+ * drift: every response, success or error, is application/json, so whether a request can be answered
+ * at all is decided from the Accept header alone, before any route runs (see acceptsProducedType).
  */
 @OptIn(ExperimentalSerializationApi::class)
 fun Application.configureErrorHandling() {
     install(StatusPages) {
         exception<ValidationException> { call, e ->
             call.respondApiError(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, e.message ?: "invalid request"))
+        }
+        exception<NotAcceptableException> { call, e ->
+            call.respondApiError(HttpStatusCode.NotAcceptable, ApiError(ApiError.VALIDATION_ERROR, e.message ?: NO_ACCEPTABLE_RESPONSE))
         }
         exception<NotFoundException> { call, e ->
             call.respondApiError(HttpStatusCode.NotFound, ApiError(ApiError.NOT_FOUND, e.message ?: "not found"))
@@ -89,20 +95,60 @@ fun Application.configureErrorHandling() {
             call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, "method not allowed"))
         }
         status(HttpStatusCode.NotAcceptable) { call, status ->
-            // The request itself may already have been applied; only the response is unacceptable.
-            call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, "no acceptable response media type"))
+            // Unreachable while ValidateAccept rejects the same requests first; kept so a response type
+            // this file does not know about still answers with the shared shape instead of an empty body.
+            call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, NO_ACCEPTABLE_RESPONSE))
         }
     }
-    // Validate before route side effects, using the same syntax parser as ContentNegotiation.
+    // Validate before route side effects, using the same syntax parser as ContentNegotiation. A route
+    // that cannot be answered must not run: it would write, then fail negotiation, and the caller would
+    // read an error for a transaction that exists.
     install(createApplicationPlugin("ValidateAccept") {
         onCall { call ->
-            try {
-                parseHeaderValue(call.request.headers[HttpHeaders.Accept]).forEach { ContentType.parse(it.value) }
+            val ranges = try {
+                parseHeaderValue(call.request.headers[HttpHeaders.Accept])
+                    .map { ContentType.parse(it.value).withoutParameters() to it.quality }
             } catch (_: BadContentTypeFormatException) {
                 throw ValidationException("malformed Accept header")
             }
+            if (!acceptsProducedType(ranges)) throw NotAcceptableException(NO_ACCEPTABLE_RESPONSE)
         }
     })
+}
+
+private const val NO_ACCEPTABLE_RESPONSE = "no acceptable response media type"
+
+/** The only media type this API produces, for successful responses and for errors alike. */
+private val PRODUCED_TYPE = ContentType.Application.Json
+
+/**
+ * Whether these Accept media ranges, each paired with its quality, permit [PRODUCED_TYPE],
+ * per RFC 9110 12.5.1. Parsing happens in the caller so this cannot throw on a malformed header.
+ *
+ * An absent or empty Accept expresses no preference and accepts anything. Otherwise the most specific
+ * matching range decides - an exact `application/json`, then a subtype wildcard, then the catch-all -
+ * and within one specificity the highest quality wins: `application/json;q=0` followed by the catch-all
+ * is a rejection, while `application/json` followed by a catch-all at `q=0` is not. A quality of zero
+ * excludes. Range parameters other than `q` are dropped by the caller rather than matched, because the
+ * produced type carries none a range could select between: `application/json;charset=utf-16` is JSON.
+ */
+private fun acceptsProducedType(ranges: List<Pair<ContentType, Double>>): Boolean {
+    if (ranges.isEmpty()) return true
+    var specificity = -1
+    var quality = 0.0
+    for ((range, rangeQuality) in ranges) {
+        if (!PRODUCED_TYPE.match(range)) continue
+        val rank = when {
+            range.contentType == "*" -> 0
+            range.contentSubtype == "*" -> 1
+            else -> 2
+        }
+        if (rank > specificity || (rank == specificity && rangeQuality > quality)) {
+            specificity = rank
+            quality = rangeQuality
+        }
+    }
+    return quality > 0.0
 }
 
 // Bare field names are ambiguous when a nested object reuses one: MoneyDto.amount and

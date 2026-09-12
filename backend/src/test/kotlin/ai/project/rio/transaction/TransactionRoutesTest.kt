@@ -163,6 +163,9 @@ class TransactionRoutesTest {
         )
         val repository = TransactionRepository(Database.open(dbFile))
         for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
+            // Malformed and unacceptable Accept headers are both rejected before routing, so no target
+            // reaches its handler: the status describes the header, not what the route would have done.
+            val rejectedBeforeRouting = accept.startsWith("**") || accept == "text/plain"
             val countBefore = repository.findAll().size
             for ((target, type, normalStatus) in cases) {
                 val body = if (normalStatus == 201) validRequest else ""
@@ -170,7 +173,7 @@ class TransactionRoutesTest {
                 val response = rawRequest(port, target, headers, body)
                 val expectedStatus = when {
                     accept.startsWith("**") -> 400
-                    normalStatus in 200..299 && accept == "text/plain" -> 406
+                    accept == "text/plain" -> 406
                     else -> normalStatus
                 }
                 assertEquals(expectedStatus, response.status, response.raw)
@@ -184,28 +187,86 @@ class TransactionRoutesTest {
                 assertTrue(!response.body.contains("secret-marker") && !response.body.contains("server-only-secret"), response.body)
                 when {
                     accept.startsWith("**") -> assertEquals("malformed Accept header", response.message())
-                    // The route already ran and, for POST, already wrote; only the response is unacceptable (#13).
                     expectedStatus == 406 -> assertEquals("no acceptable response media type", response.message())
                 }
             }
-            if (accept.startsWith("**")) assertEquals(countBefore, repository.findAll().size)
+            if (rejectedBeforeRouting) assertEquals(countBefore, repository.findAll().size)
+        }
+    }
+
+    /**
+     * Selected negotiation semantics (RFC 9110 12.5.1), enforced before routing: absent or empty
+     * Accept means no preference; the most specific matching media range decides - an exact
+     * `application/json`, then a subtype wildcard, then the catch-all - and within one specificity the
+     * highest q wins; q=0 excludes; range parameters other than q are ignored. Every response this API
+     * can produce is application/json, so a request excluding it must not reach a route at all.
+     */
+    @Test
+    fun `an unacceptable Accept is rejected before the route runs`() = withRawServer { port ->
+        val unacceptable = listOf(
+            "application/json;q=0",
+            "*/*;q=0",
+            "application/*;q=0",
+            "application/json;q=0, */*",
+            "text/plain",
+            "text/plain, text/html",
+            "text/html",
+            "text/*",
+            "application/xml",
+        )
+        val acceptable = listOf(
+            null,
+            "",
+            "application/json",
+            "Application/JSON",
+            "application/json; charset=utf-8",
+            "*/*",
+            "application/*",
+            "text/plain, application/json",
+            "text/plain;q=0.9, application/json;q=0.1",
+            "text/html, */*;q=0.5",
+            "application/json, */*;q=0",
+        )
+        val repository = TransactionRepository(Database.open(dbFile))
+        for (accept in acceptable + unacceptable) {
+            val rejected = accept in unacceptable
+            val headers = listOfNotNull(accept?.let { "Accept: $it" })
+            for ((target, success, schema) in listOf(
+                Triple("GET /api/transactions", 200, "transaction-list-response.schema.json"),
+                Triple("POST /api/transactions", 201, "transaction.schema.json"),
+            )) {
+                val post = target.startsWith("POST")
+                val countBefore = repository.findAll().size
+                val response = rawRequest(
+                    port,
+                    target,
+                    if (post) headers + "Content-Type: application/json" else headers,
+                    if (post) validRequest else "",
+                )
+                val context = "Accept: $accept; $target; ${response.raw}"
+                assertEquals(if (rejected) 406 else success, response.status, context)
+                assertTrue(response.hasHeader("Content-Type: application/json"), context)
+                assertMatchesSchema(response.body, if (rejected) "api-error.schema.json" else schema)
+                if (rejected) {
+                    assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
+                    assertEquals("no acceptable response media type", response.message())
+                }
+                // The write is the side effect a rejected request must not leave behind.
+                assertEquals(countBefore + if (post && !rejected) 1 else 0, repository.findAll().size, context)
+            }
         }
     }
 
     @Test
     fun `framework generated statuses carry the shared error shape`() = withRawServer { port ->
-        // Routing and ContentNegotiation produce these without throwing, so they never reach an
-        // exception handler and used to answer with an empty body.
+        // Routing produces this without throwing, so it never reaches an exception handler and used to
+        // answer with an empty body. An unsatisfiable Accept no longer reaches the framework at all.
         for (method in listOf("PUT", "DELETE", "PATCH")) {
             val response = rawRequest(port, "$method /api/transactions")
             assertEquals(405, response.status, response.raw)
             assertMatchesSchema(response.body, "api-error.schema.json")
             assertEquals("method not allowed", response.message())
         }
-        val unacceptable = rawRequest(port, "GET /api/transactions", listOf("Accept: text/html"))
-        assertEquals(406, unacceptable.status, unacceptable.raw)
-        assertMatchesSchema(unacceptable.body, "api-error.schema.json")
-        assertEquals("no acceptable response media type", unacceptable.message())
     }
 
     @Test

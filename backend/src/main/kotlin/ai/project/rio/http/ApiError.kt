@@ -15,5 +15,8 @@ data class ApiError(val code: String, val message: String) {
 /** Invalid request or domain rule violation -> HTTP 400. */
 class ValidationException(message: String) : RuntimeException(message)
 
+/** No representation the request accepts can carry the response -> HTTP 406. */
+class NotAcceptableException(message: String) : RuntimeException(message)
+
 /** Referenced resource does not exist -> HTTP 404. */
 class NotFoundException(message: String) : RuntimeException(message)
