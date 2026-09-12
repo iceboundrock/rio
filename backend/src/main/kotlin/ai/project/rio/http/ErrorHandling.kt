@@ -14,7 +14,9 @@ import io.ktor.server.application.log
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.CannotTransformContentToTypeException
 import io.ktor.server.plugins.UnsupportedMediaTypeException
+import io.ktor.server.plugins.contentnegotiation.ContentTypeWithQuality
 import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.request.ApplicationRequest
 import io.ktor.server.response.respond
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.MissingFieldException
@@ -100,18 +102,11 @@ fun Application.configureErrorHandling() {
             call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, NO_ACCEPTABLE_RESPONSE))
         }
     }
-    // Validate before route side effects, using the same syntax parser as ContentNegotiation. A route
-    // that cannot be answered must not run: it would write, then fail negotiation, and the caller would
-    // read an error for a transaction that exists.
+    // Validate before route side effects. A route that cannot be answered must not run: it would
+    // write, then fail negotiation, and the caller would read an error for a transaction that exists.
     install(createApplicationPlugin("ValidateAccept") {
         onCall { call ->
-            val ranges = try {
-                parseHeaderValue(call.request.headers[HttpHeaders.Accept])
-                    .map { ContentType.parse(it.value).withoutParameters() to it.quality }
-            } catch (_: BadContentTypeFormatException) {
-                throw ValidationException("malformed Accept header")
-            }
-            if (!acceptsProducedType(ranges)) throw NotAcceptableException(NO_ACCEPTABLE_RESPONSE)
+            if (!acceptsProducedType(call.request.acceptRanges())) throw NotAcceptableException(NO_ACCEPTABLE_RESPONSE)
         }
     })
 }
@@ -121,18 +116,47 @@ private const val NO_ACCEPTABLE_RESPONSE = "no acceptable response media type"
 /** The only media type this API produces, for successful responses and for errors alike. */
 private val PRODUCED_TYPE = ContentType.Application.Json
 
+/** RFC 9110 12.4.2 qvalue: `0` with up to three decimals, or `1` with up to three zeros. */
+private val QVALUE = Regex("""0(\.[0-9]{0,3})?|1(\.0{0,3})?""")
+
 /**
- * Whether these Accept media ranges, each paired with its quality, permit [PRODUCED_TYPE],
- * per RFC 9110 12.5.1. Parsing happens in the caller so this cannot throw on a malformed header.
+ * The Accept media ranges of this request, each with its quality, read the way RFC 9110 requires:
+ * repeated field lines combine in received order (5.2), empty list elements are ignored (5.6.1) and
+ * the `q` parameter name is case-insensitive (12.4.2). Ktor's own reading differs on all three -
+ * `ContentNegotiation` sees the first line only and `HeaderValue.quality` recognises a lower-case `q`
+ * and silently treats an unparseable value as 1 - so the response converter is given this list too
+ * (Application.kt); otherwise a request this guard admits could still fail negotiation after the route
+ * has run. Anything outside the header grammar, a qvalue included, is a malformed Accept: the server
+ * does not guess at a preference it cannot read. Range parameters other than `q` are dropped rather
+ * than matched, because the produced type carries none a range could select between:
+ * `application/json;charset=utf-16` is JSON.
+ */
+fun ApplicationRequest.acceptRanges(): List<ContentTypeWithQuality> {
+    val lines = headers.getAll(HttpHeaders.Accept) ?: return emptyList()
+    return try {
+        parseHeaderValue(lines.joinToString(","))
+            .filter { it.value.isNotBlank() }
+            .map { range ->
+                val q = range.params.firstOrNull { it.name.equals("q", ignoreCase = true) }?.value
+                if (q != null && !QVALUE.matches(q)) throw ValidationException("malformed Accept header")
+                ContentTypeWithQuality(ContentType.parse(range.value).withoutParameters(), q?.toDouble() ?: 1.0)
+            }
+    } catch (_: BadContentTypeFormatException) {
+        throw ValidationException("malformed Accept header")
+    }
+}
+
+/**
+ * Whether these Accept media ranges permit [PRODUCED_TYPE], per RFC 9110 12.5.1. Parsing happens in
+ * [acceptRanges] so this cannot throw on a malformed header.
  *
  * An absent or empty Accept expresses no preference and accepts anything. Otherwise the most specific
  * matching range decides - an exact `application/json`, then a subtype wildcard, then the catch-all -
  * and within one specificity the highest quality wins: `application/json;q=0` followed by the catch-all
  * is a rejection, while `application/json` followed by a catch-all at `q=0` is not. A quality of zero
- * excludes. Range parameters other than `q` are dropped by the caller rather than matched, because the
- * produced type carries none a range could select between: `application/json;charset=utf-16` is JSON.
+ * excludes.
  */
-private fun acceptsProducedType(ranges: List<Pair<ContentType, Double>>): Boolean {
+private fun acceptsProducedType(ranges: List<ContentTypeWithQuality>): Boolean {
     if (ranges.isEmpty()) return true
     var specificity = -1
     var quality = 0.0

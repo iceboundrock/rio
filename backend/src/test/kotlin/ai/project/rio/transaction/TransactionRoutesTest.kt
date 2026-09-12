@@ -200,37 +200,71 @@ class TransactionRoutesTest {
      * `application/json`, then a subtype wildcard, then the catch-all - and within one specificity the
      * highest q wins; q=0 excludes; range parameters other than q are ignored. Every response this API
      * can produce is application/json, so a request excluding it must not reach a route at all.
+     *
+     * Each case is the list of Accept field lines sent: repeated lines combine in received order
+     * (RFC 9110 5.2) and empty list elements are ignored (5.6.1). The parameter name `q` is
+     * case-insensitive (12.4.2); a value outside the qvalue grammar is a malformed header (400), not
+     * a preference the server guesses at.
      */
     @Test
     fun `an unacceptable Accept is rejected before the route runs`() = withRawServer { port ->
         val unacceptable = listOf(
-            "application/json;q=0",
-            "*/*;q=0",
-            "application/*;q=0",
-            "application/json;q=0, */*",
-            "text/plain",
-            "text/plain, text/html",
-            "text/html",
-            "text/*",
-            "application/xml",
+            listOf("application/json;q=0"),
+            listOf("application/json;Q=0"),
+            listOf("*/*;q=0"),
+            listOf("*/*;Q=0"),
+            listOf("application/*;q=0"),
+            listOf("application/json;q=0, */*"),
+            listOf("application/json;Q=0, */*"),
+            listOf("text/plain"),
+            listOf("text/plain, text/html"),
+            listOf("text/plain, "),
+            listOf("text/html"),
+            listOf("text/*"),
+            listOf("application/xml"),
+            listOf("text/plain", "text/html"),
+            listOf("application/json;q=0", "*/*"),
+            listOf("text/plain", ""),
         )
         val acceptable = listOf(
             null,
-            "",
-            "application/json",
-            "Application/JSON",
-            "application/json; charset=utf-8",
-            "*/*",
-            "application/*",
-            "text/plain, application/json",
-            "text/plain;q=0.9, application/json;q=0.1",
-            "text/html, */*;q=0.5",
-            "application/json, */*;q=0",
+            listOf(""),
+            listOf("application/json"),
+            listOf("Application/JSON"),
+            listOf("application/json; charset=utf-8"),
+            listOf("application/json;Q=0.5"),
+            listOf("*/*"),
+            listOf("application/*"),
+            listOf("text/plain, application/json"),
+            listOf("text/plain;q=0.9, application/json;q=0.1"),
+            listOf("text/plain;Q=0.9, application/json;Q=0.1"),
+            listOf("text/html, */*;q=0.5"),
+            listOf("application/json, */*;q=0"),
+            listOf("application/json, */*;Q=0"),
+            listOf("text/plain", "application/json"),
+            listOf("application/json", "text/plain"),
+            listOf("", "application/json"),
+            listOf("text/html", "*/*;q=0.5"),
+        )
+        val malformed = listOf(
+            listOf("application/json;q=abc"),
+            listOf("application/json;q="),
+            listOf("application/json;q=2"),
+            listOf("application/json;q=-1"),
+            listOf("application/json;q=1.5"),
+            listOf("application/json;q=.5"),
+            listOf("application/json;q=0.1234"),
+            listOf("application/json;Q=abc"),
+            listOf("application/json", "text/plain;q=2"),
         )
         val repository = TransactionRepository(Database.open(dbFile))
-        for (accept in acceptable + unacceptable) {
-            val rejected = accept in unacceptable
-            val headers = listOfNotNull(accept?.let { "Accept: $it" })
+        for (accept in acceptable + unacceptable + malformed) {
+            val expectedError = when (accept) {
+                in unacceptable -> 406 to "no acceptable response media type"
+                in malformed -> 400 to "malformed Accept header"
+                else -> null
+            }
+            val headers = accept.orEmpty().map { "Accept: $it" }
             for ((target, success, schema) in listOf(
                 Triple("GET /api/transactions", 200, "transaction-list-response.schema.json"),
                 Triple("POST /api/transactions", 201, "transaction.schema.json"),
@@ -244,15 +278,15 @@ class TransactionRoutesTest {
                     if (post) validRequest else "",
                 )
                 val context = "Accept: $accept; $target; ${response.raw}"
-                assertEquals(if (rejected) 406 else success, response.status, context)
+                assertEquals(expectedError?.first ?: success, response.status, context)
                 assertTrue(response.hasHeader("Content-Type: application/json"), context)
-                assertMatchesSchema(response.body, if (rejected) "api-error.schema.json" else schema)
-                if (rejected) {
+                assertMatchesSchema(response.body, if (expectedError != null) "api-error.schema.json" else schema)
+                if (expectedError != null) {
                     assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
-                    assertEquals("no acceptable response media type", response.message())
+                    assertEquals(expectedError.second, response.message())
                 }
                 // The write is the side effect a rejected request must not leave behind.
-                assertEquals(countBefore + if (post && !rejected) 1 else 0, repository.findAll().size, context)
+                assertEquals(countBefore + if (post && expectedError == null) 1 else 0, repository.findAll().size, context)
             }
         }
     }

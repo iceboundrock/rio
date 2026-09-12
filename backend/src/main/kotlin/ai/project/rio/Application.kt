@@ -3,6 +3,7 @@ package ai.project.rio
 import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
 import ai.project.rio.db.SchemaInitializer
+import ai.project.rio.http.acceptRanges
 import ai.project.rio.http.configureErrorHandling
 import ai.project.rio.transaction.TransactionRepository
 import ai.project.rio.transaction.TransactionService
@@ -40,6 +41,9 @@ fun main() {
 fun Application.module(jdbc: JdbcTemplate) {
     install(ContentNegotiation) {
         json(Json { ignoreUnknownKeys = false })
+        // Negotiate the success response from the same reading of Accept that admitted the request
+        // (see acceptRanges); the plugin's own reading would 406 a repeated Accept line after the write.
+        accept { call, _ -> call.request.acceptRanges() }
     }
     install(CallLogging)
     configureErrorHandling()

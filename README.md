@@ -122,10 +122,15 @@ decided from `Accept` alone, *before* any route runs: a request that excludes JS
 The selected semantics (RFC 9110 §12.5.1):
 
 - An absent or empty `Accept` expresses no preference and accepts anything.
+- Repeated `Accept` field lines are combined in received order (§5.2) and empty list elements are
+  ignored (§5.6.1): `Accept: text/plain` followed by `Accept: application/json` is
+  `text/plain, application/json`, in either order.
 - The most specific matching media range decides: exact `application/json`, then `application/*`,
   then `*/*`. Within one specificity the highest `q` wins, so `application/json;q=0, */*` is rejected
   while `application/json, */*;q=0` is accepted.
-- `q=0` excludes; any `q` above zero accepts, since there is nothing to choose between.
+- `q=0` excludes; any `q` above zero accepts, since there is nothing to choose between. The parameter
+  name is case-insensitive (`Q=0` excludes too). A value outside the qvalue grammar (§12.4.2 —
+  `q=abc`, `q=2`, `q=.5`) is a malformed `Accept` and returns 400 rather than a guessed preference.
 - Range parameters other than `q` are ignored rather than matched: `application/json;charset=utf-16`
   is treated as `application/json`.
 
