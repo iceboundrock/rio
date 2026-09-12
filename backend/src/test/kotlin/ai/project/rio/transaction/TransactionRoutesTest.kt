@@ -18,6 +18,9 @@ import io.ktor.http.content.OutgoingContent
 import io.ktor.http.contentType
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.install
+import io.ktor.server.request.receiveMultipart
+import io.ktor.server.routing.post
+import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.nio.file.Files
@@ -93,7 +96,7 @@ class TransactionRoutesTest {
                 onCall { call -> receivedTypes.add(call.request.headers[HttpHeaders.ContentType]) }
             })
         }
-        for (type in listOf(null, ContentType.Application.OctetStream, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded)) {
+        for (type in listOf(null, ContentType.Application.OctetStream, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded, ContentType.parse("application/vnd.api+json"))) {
             val response = client.post("/api/transactions") {
                 setBody(object : OutgoingContent.ByteArrayContent() {
                     override val contentType: ContentType? = type
@@ -106,7 +109,28 @@ class TransactionRoutesTest {
             val body = response.bodyAsText()
             assertMatchesSchema(body, "api-error.schema.json")
             assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
+            val message = if (type == null) "missing Content-Type" else "unsupported Content-Type: $type"
+            assertEquals(message, Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
         }
+    }
+
+    @Test
+    fun `multipart receive rejects JSON without advising the caller to send JSON`() = withApp {
+        application {
+            routing {
+                post("/test-multipart") { call.receiveMultipart() }
+            }
+        }
+        val response = client.post("/test-multipart") {
+            contentType(ContentType.Application.Json)
+            setBody(validRequest)
+        }
+        assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
+        val body = response.bodyAsText()
+        assertMatchesSchema(body, "api-error.schema.json")
+        val error = Json.parseToJsonElement(body).jsonObject
+        assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
+        assertEquals("unsupported Content-Type: application/json", error["message"]!!.jsonPrimitive.content)
     }
 
     // ---- GET list ----

@@ -1,7 +1,9 @@
 package ai.project.rio.http
 
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.HttpHeaders
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.server.application.log
 import io.ktor.server.plugins.BadRequestException
@@ -32,10 +34,10 @@ fun Application.configureErrorHandling() {
             call.respond(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, describeBadRequest(e)))
         }
         exception<UnsupportedMediaTypeException> { call, _ ->
-            call.respond(HttpStatusCode.UnsupportedMediaType, ApiError(ApiError.VALIDATION_ERROR, "Content-Type must be application/json"))
+            call.respondUnsupportedContentType()
         }
         exception<CannotTransformContentToTypeException> { call, _ ->
-            call.respond(HttpStatusCode.UnsupportedMediaType, ApiError(ApiError.VALIDATION_ERROR, "Content-Type must be application/json"))
+            call.respondUnsupportedContentType()
         }
         exception<Throwable> { call, e ->
             call.application.log.error("Unhandled exception for ${call.request.local.method.value} ${call.request.local.uri}", e)
@@ -45,6 +47,14 @@ fun Application.configureErrorHandling() {
             call.respond(status, ApiError(ApiError.NOT_FOUND, "no route for ${call.request.local.uri}"))
         }
     }
+}
+
+private suspend fun ApplicationCall.respondUnsupportedContentType() {
+    // Report the supplied type, not a required type that varies by route. Keep the exception
+    // mappings explicit: other ContentTransformationException subtypes may represent server failures.
+    val type = request.headers[HttpHeaders.ContentType]
+    val message = if (type == null) "missing Content-Type" else "unsupported Content-Type: $type"
+    respond(HttpStatusCode.UnsupportedMediaType, ApiError(ApiError.VALIDATION_ERROR, message))
 }
 
 private fun describeBadRequest(e: BadRequestException): String {
