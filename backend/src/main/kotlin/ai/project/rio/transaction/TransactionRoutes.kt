@@ -1,5 +1,7 @@
 package ai.project.rio.transaction
 
+import ai.project.rio.http.ExpectedRequestContentType
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -29,7 +31,9 @@ fun Route.transactionRoutes(service: TransactionService) {
         }
 
         post {
-            call.response.headers.append("Accept-Post", "application/json")
+            val contentType = ContentType.Application.Json
+            call.attributes.put(ExpectedRequestContentType, contentType)
+            call.response.headers.append("Accept-Post", contentType.toString())
             val request = call.receive<CreateTransactionRequest>()
             val created = service.create(
                 description = request.description,

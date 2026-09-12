@@ -15,7 +15,7 @@ class TransactionService(
     fun list(): List<Transaction> = repository.findAll()
 
     fun get(id: String): Transaction =
-        repository.findById(id) ?: throw NotFoundException("transaction $id not found")
+        repository.findById(id) ?: throw NotFoundException("transaction not found")
 
     fun create(description: String, amount: Money, type: TransactionType): Transaction {
         if (description.isBlank()) throw ValidationException("description must not be blank")
