@@ -203,8 +203,9 @@ class TransactionRoutesTest {
      *
      * Each case is the list of Accept field lines sent: repeated lines combine in received order
      * (RFC 9110 5.2) and empty list elements are ignored (5.6.1). The parameter name `q` is
-     * case-insensitive (12.4.2); a value outside the qvalue grammar is a malformed header (400), not
-     * a preference the server guesses at.
+     * case-insensitive (12.4.2). Anything outside the Accept grammar - a bare `*`, a quoted qvalue,
+     * whitespace inside a media range - is a malformed header (400), not a preference the server
+     * guesses at; a quoted-string parameter other than `q` is grammatical and may contain `,` or `;`.
      */
     @Test
     fun `an unacceptable Accept is rejected before the route runs`() = withRawServer { port ->
@@ -225,6 +226,9 @@ class TransactionRoutesTest {
             listOf("text/plain", "text/html"),
             listOf("application/json;q=0", "*/*"),
             listOf("text/plain", ""),
+            listOf("application/json;charset=\"a,b\";q=0"),
+            listOf("text/plain;note=\"a;q=1\""),
+            listOf("application/json ;; q=0"),
         )
         val acceptable = listOf(
             null,
@@ -245,6 +249,12 @@ class TransactionRoutesTest {
             listOf("application/json", "text/plain"),
             listOf("", "application/json"),
             listOf("text/html", "*/*;q=0.5"),
+            listOf(","),
+            listOf("application/json ; q=0.5"),
+            listOf("application/json;q=0.5;ext=1"),
+            listOf("application/json;charset=\"utf-8\""),
+            listOf("application/json;"),
+            listOf("*/*;q=0.001"),
         )
         val malformed = listOf(
             listOf("application/json;q=abc"),
@@ -256,6 +266,20 @@ class TransactionRoutesTest {
             listOf("application/json;q=0.1234"),
             listOf("application/json;Q=abc"),
             listOf("application/json", "text/plain;q=2"),
+            listOf("*"),
+            listOf("*;q=0.5"),
+            listOf("text/plain, *"),
+            listOf("application/json", "*"),
+            listOf("application/json;q=\"0.5\""),
+            listOf("application/json;q=\"0\""),
+            listOf("application / json"),
+            listOf("application"),
+            listOf("/json"),
+            listOf("application/"),
+            listOf("application/json foo"),
+            listOf("application/json;charset"),
+            listOf("application/json;charset=\"open"),
+            listOf("application/json;q = 0"),
         )
         val repository = TransactionRepository(Database.open(dbFile))
         for (accept in acceptable + unacceptable + malformed) {

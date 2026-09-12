@@ -5,7 +5,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
-import io.ktor.http.parseHeaderValue
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.createApplicationPlugin
@@ -116,34 +115,50 @@ private const val NO_ACCEPTABLE_RESPONSE = "no acceptable response media type"
 /** The only media type this API produces, for successful responses and for errors alike. */
 private val PRODUCED_TYPE = ContentType.Application.Json
 
-/** RFC 9110 12.4.2 qvalue: `0` with up to three decimals, or `1` with up to three zeros. */
+// RFC 9110 grammar for Accept: `#( media-range [ weight ] )` where a media-range is `token "/" token`
+// followed by `*( OWS ";" OWS [ token "=" ( token / quoted-string ) ] )` (5.6.2, 5.6.4, 5.6.6, 12.5.1)
+// and a weight is the parameter `q` with a qvalue of `0` and up to three decimals or `1` and up to
+// three zeros (12.4.2). Kotlin's `\s` is wider than OWS, which is only SP and HTAB.
+private const val OWS = """[ \t]*"""
+private const val TOKEN = """[!#$%&'*+\-.^_`|~0-9A-Za-z]+"""
+private const val QUOTED_STRING = """"(?:[^"\\]|\\.)*""""
+private val ACCEPT_ELEMENT = Regex("""($TOKEN/$TOKEN)((?:$OWS;$OWS(?:$TOKEN=(?:$TOKEN|$QUOTED_STRING))?)*)""")
+private val ACCEPT_PARAMETER = Regex("""($TOKEN)=($TOKEN|$QUOTED_STRING)""")
 private val QVALUE = Regex("""0(\.[0-9]{0,3})?|1(\.0{0,3})?""")
 
 /**
  * The Accept media ranges of this request, each with its quality, read the way RFC 9110 requires:
  * repeated field lines combine in received order (5.2), empty list elements are ignored (5.6.1) and
- * the `q` parameter name is case-insensitive (12.4.2). Ktor's own reading differs on all three -
- * `ContentNegotiation` sees the first line only and `HeaderValue.quality` recognises a lower-case `q`
- * and silently treats an unparseable value as 1 - so the response converter is given this list too
- * (Application.kt); otherwise a request this guard admits could still fail negotiation after the route
- * has run. Anything outside the header grammar, a qvalue included, is a malformed Accept: the server
- * does not guess at a preference it cannot read. Range parameters other than `q` are dropped rather
- * than matched, because the produced type carries none a range could select between:
- * `application/json;charset=utf-16` is JSON.
+ * the `q` parameter name is case-insensitive (12.4.2). Anything outside the grammar above is a
+ * malformed Accept: the server does not guess at a preference it cannot read. Ktor's own reading is
+ * looser on every point - `ContentNegotiation` sees the first line only, `ContentType.parse` turns a
+ * bare `*` into the catch-all and tolerates spaces around the slash, `parseHeaderValue` strips the
+ * quotes from a parameter value, and `HeaderValue.quality` recognises a lower-case `q` and silently
+ * treats an unparseable value as 1 - so the response converter is given this list too (Application.kt);
+ * otherwise a request this guard admits could still fail negotiation after the route has run. Range
+ * parameters other than `q` are parsed but not matched, because the produced type carries none a range
+ * could select between: `application/json;charset=utf-16` is JSON.
  */
 fun ApplicationRequest.acceptRanges(): List<ContentTypeWithQuality> {
-    val lines = headers.getAll(HttpHeaders.Accept) ?: return emptyList()
-    return try {
-        parseHeaderValue(lines.joinToString(","))
-            .filter { it.value.isNotBlank() }
-            .map { range ->
-                val q = range.params.firstOrNull { it.name.equals("q", ignoreCase = true) }?.value
+    val text = headers.getAll(HttpHeaders.Accept)?.joinToString(",") ?: return emptyList()
+    val ranges = mutableListOf<ContentTypeWithQuality>()
+    var position = 0
+    while (position < text.length) {
+        when (text[position]) {
+            ' ', '\t', ',' -> position++ // OWS and empty list elements
+            else -> {
+                val element = ACCEPT_ELEMENT.matchAt(text, position) ?: throw ValidationException("malformed Accept header")
+                val q = ACCEPT_PARAMETER.findAll(element.groupValues[2])
+                    .firstOrNull { it.groupValues[1].equals("q", ignoreCase = true) }?.groupValues?.get(2)
                 if (q != null && !QVALUE.matches(q)) throw ValidationException("malformed Accept header")
-                ContentTypeWithQuality(ContentType.parse(range.value).withoutParameters(), q?.toDouble() ?: 1.0)
+                ranges += ContentTypeWithQuality(ContentType.parse(element.groupValues[1]), q?.toDouble() ?: 1.0)
+                position = element.range.last + 1
+                while (position < text.length && (text[position] == ' ' || text[position] == '\t')) position++
+                if (position < text.length && text[position] != ',') throw ValidationException("malformed Accept header")
             }
-    } catch (_: BadContentTypeFormatException) {
-        throw ValidationException("malformed Accept header")
+        }
     }
+    return ranges
 }
 
 /**
