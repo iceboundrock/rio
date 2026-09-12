@@ -22,6 +22,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.Application
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.install
 import io.ktor.server.application.log
@@ -81,118 +82,150 @@ class TransactionRoutesTest {
 
     private val validRequest = """{"description":"Lunch","amount":{"amount":"1800","currency":"USD"},"type":"DEBIT"}"""
 
-    @Test
-    fun `raw HTTP media types preserve malformed blank and mixed case headers`() = runBlocking {
-        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0) { module(Database.open(dbFile)) }
+    /**
+     * Raw sockets rather than the Ktor test client: the client parses Content-Type and Accept while
+     * building the request and rejects malformed values before they ever reach the server.
+     */
+    private fun withRawServer(app: Application.() -> Unit = { module(Database.open(dbFile)) }, block: suspend (Int) -> Unit) = runBlocking {
+        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0, module = app)
         try {
             server.start(wait = false)
-            val port = server.engine.resolvedConnectors().single().port
-            val cases = listOf(
-                Triple(null, 415, "missing Content-Type"),
-                Triple("", 415, "missing Content-Type"),
-                Triple("   ", 415, "missing Content-Type"),
-                Triple("not a mime type", 400, "malformed Content-Type header"),
-                Triple("text/plain", 415, "unsupported Content-Type"),
-                Triple("text/" + "x".repeat(2000), 415, "unsupported Content-Type"),
-                Triple("text/plain; secret=" + "x".repeat(2000), 415, "unsupported Content-Type"),
-                Triple("Application/JSON; charset=utf-8", 201, null),
-                Triple("APPLICATION/JSON;CHARSET=UTF-8", 201, null),
-                Triple("application/json;charset=", 201, null),
-            )
-            for ((type, status, message) in cases) {
-                // HTTP/1.0 + Connection: close avoids chunk framing; no client can normalize Content-Type.
-                val response = Socket("127.0.0.1", port).use { socket ->
-                    socket.soTimeout = 10_000
-                    val request = buildString {
-                        append("POST /api/transactions HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n")
-                        if (type != null) append("Content-Type: $type\r\n")
-                        append("Content-Length: ${validRequest.toByteArray().size}\r\n\r\n")
-                        append(validRequest)
-                    }
-                    socket.getOutputStream().write(request.toByteArray())
-                    socket.getOutputStream().flush()
-                    socket.getInputStream().bufferedReader().readText()
-                }
-                val headers = response.substringBefore("\r\n\r\n")
-                val body = response.substringAfter("\r\n\r\n")
-                assertEquals(status, headers.substringBefore("\r\n").split(" ")[1].toInt(), "Content-Type: $type; $response")
-                assertTrue(headers.lineSequence().any { it.equals("Accept-Post: application/json", ignoreCase = true) })
-                assertMatchesSchema(body, if (status == 201) "transaction.schema.json" else "api-error.schema.json")
-                if (message != null) {
-                    val error = Json.parseToJsonElement(body).jsonObject
-                    assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
-                    assertEquals(message, error["message"]!!.jsonPrimitive.content)
-                }
-            }
+            block(server.engine.resolvedConnectors().single().port)
         } finally {
             server.stop(0, 5_000)
         }
     }
 
-    @Test
-    fun `raw Accept headers cannot bypass error serialization`() = runBlocking {
-        val server = embeddedServer(Netty, host = "127.0.0.1", port = 0) {
-            module(Database.open(dbFile))
-            routing { get("/test-failure") { error("server-only-secret") } }
-        }
-        try {
-            server.start(wait = false)
-            val port = server.engine.resolvedConnectors().single().port
-            val cases = listOf(
-                Triple("GET /api/transactions", null, 200),
-                Triple("GET /api/transactions/nope", null, 404),
-                Triple("GET /api/no-route", null, 404),
-                Triple("POST /api/transactions", "text/plain", 415),
-                Triple("POST /api/transactions", "application/json", 400),
-                Triple("POST /api/transactions", "application/json", 201),
-                Triple("GET /test-failure", null, 500),
-            )
-            val repository = TransactionRepository(Database.open(dbFile))
-            for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
-                val countBefore = repository.findAll().size
-                for ((target, type, normalStatus) in cases) {
-                    val response = Socket("127.0.0.1", port).use { socket ->
-                        socket.soTimeout = 10_000
-                        val request = buildString {
-                            append("$target HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\nAccept: $accept\r\n")
-                            if (type != null) append("Content-Type: $type\r\n")
-                            val body = if (normalStatus == 201) validRequest else ""
-                            append("Content-Length: ${body.toByteArray().size}\r\n\r\n")
-                            append(body)
-                        }
-                        socket.getOutputStream().write(request.toByteArray())
-                        socket.getOutputStream().flush()
-                        socket.getInputStream().bufferedReader().readText()
-                    }
-                    val headers = response.substringBefore("\r\n\r\n")
-                    val body = response.substringAfter("\r\n\r\n")
-                    val expectedStatus = when {
-                        accept.startsWith("**") -> 400
-                        normalStatus in 200..299 && accept == "text/plain" -> 406
-                        else -> normalStatus
-                    }
-                    assertEquals(expectedStatus, headers.substringBefore("\r\n").split(" ")[1].toInt(), response)
-                    if (expectedStatus == 406) {
-                        assertEquals("", body)
-                    } else {
-                        assertTrue(headers.lowercase().contains("content-type: application/json"), response)
-                        val schema = when (expectedStatus) {
-                            200 -> "transaction-list-response.schema.json"
-                            201 -> "transaction.schema.json"
-                            else -> "api-error.schema.json"
-                        }
-                        assertMatchesSchema(body, schema)
-                        assertTrue(!body.contains("secret-marker") && !body.contains("server-only-secret"), body)
-                        if (accept.startsWith("**")) {
-                            assertEquals("malformed Accept header", Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
-                        }
-                    }
-                }
-                if (accept.startsWith("**")) assertEquals(countBefore, repository.findAll().size)
+    // HTTP/1.0 + Connection: close avoids chunk framing and keeps the whole response readable to EOF.
+    private fun rawRequest(port: Int, requestLine: String, headers: List<String> = emptyList(), body: String = ""): RawResponse {
+        val text = Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 10_000
+            val request = buildString {
+                append("$requestLine HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n")
+                headers.forEach { append("$it\r\n") }
+                append("Content-Length: ${body.toByteArray().size}\r\n\r\n")
+                append(body)
             }
-        } finally {
-            server.stop(0, 5_000)
+            socket.getOutputStream().write(request.toByteArray())
+            socket.getOutputStream().flush()
+            socket.getInputStream().bufferedReader().readText()
         }
+        return RawResponse(text.substringBefore("\r\n\r\n"), text.substringAfter("\r\n\r\n"))
+    }
+
+    private data class RawResponse(val head: String, val body: String) {
+        val status: Int get() = head.substringBefore("\r\n").split(" ")[1].toInt()
+        val raw: String get() = "$head\r\n\r\n$body"
+        fun hasHeader(line: String): Boolean = head.lineSequence().any { it.equals(line, ignoreCase = true) }
+        fun message(): String = Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content
+    }
+
+    @Test
+    fun `raw HTTP media types preserve malformed blank and mixed case headers`() = withRawServer { port ->
+        val cases = listOf(
+            Triple(null, 415, "missing Content-Type"),
+            Triple("", 415, "missing Content-Type"),
+            Triple("   ", 415, "missing Content-Type"),
+            Triple("not a mime type", 400, "malformed Content-Type header"),
+            Triple("text/plain", 415, "unsupported Content-Type"),
+            Triple("text/" + "x".repeat(2000), 415, "unsupported Content-Type"),
+            Triple("text/plain; secret=" + "x".repeat(2000), 415, "unsupported Content-Type"),
+            Triple("Application/JSON; charset=utf-8", 201, null),
+            Triple("APPLICATION/JSON;CHARSET=UTF-8", 201, null),
+            Triple("application/json;charset=", 201, null),
+        )
+        for ((type, status, message) in cases) {
+            val headers = listOfNotNull(type?.let { "Content-Type: $it" })
+            val response = rawRequest(port, "POST /api/transactions", headers, validRequest)
+            assertEquals(status, response.status, "Content-Type: $type; ${response.raw}")
+            assertTrue(response.hasHeader("Accept-Post: application/json"))
+            assertMatchesSchema(response.body, if (status == 201) "transaction.schema.json" else "api-error.schema.json")
+            if (message != null) {
+                assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
+                assertEquals(message, response.message())
+            }
+        }
+    }
+
+    @Test
+    fun `raw Accept headers cannot bypass error serialization`() = withRawServer({
+        module(Database.open(dbFile))
+        routing { get("/test-failure") { error("server-only-secret") } }
+    }) { port ->
+        val cases = listOf(
+            Triple("GET /api/transactions", null, 200),
+            Triple("GET /api/transactions/nope", null, 404),
+            Triple("GET /api/no-route", null, 404),
+            Triple("POST /api/transactions", "text/plain", 415),
+            Triple("POST /api/transactions", "application/json", 400),
+            Triple("POST /api/transactions", "application/json", 201),
+            Triple("GET /test-failure", null, 500),
+        )
+        val repository = TransactionRepository(Database.open(dbFile))
+        for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
+            val countBefore = repository.findAll().size
+            for ((target, type, normalStatus) in cases) {
+                val body = if (normalStatus == 201) validRequest else ""
+                val headers = listOfNotNull("Accept: $accept", type?.let { "Content-Type: $it" })
+                val response = rawRequest(port, target, headers, body)
+                val expectedStatus = when {
+                    accept.startsWith("**") -> 400
+                    normalStatus in 200..299 && accept == "text/plain" -> 406
+                    else -> normalStatus
+                }
+                assertEquals(expectedStatus, response.status, response.raw)
+                assertTrue(response.hasHeader("Content-Type: application/json"), response.raw)
+                val schema = when (expectedStatus) {
+                    200 -> "transaction-list-response.schema.json"
+                    201 -> "transaction.schema.json"
+                    else -> "api-error.schema.json"
+                }
+                assertMatchesSchema(response.body, schema)
+                assertTrue(!response.body.contains("secret-marker") && !response.body.contains("server-only-secret"), response.body)
+                when {
+                    accept.startsWith("**") -> assertEquals("malformed Accept header", response.message())
+                    // The route already ran and, for POST, already wrote; only the response is unacceptable (#13).
+                    expectedStatus == 406 -> assertEquals("no acceptable response media type", response.message())
+                }
+            }
+            if (accept.startsWith("**")) assertEquals(countBefore, repository.findAll().size)
+        }
+    }
+
+    @Test
+    fun `framework generated statuses carry the shared error shape`() = withRawServer { port ->
+        // Routing and ContentNegotiation produce these without throwing, so they never reach an
+        // exception handler and used to answer with an empty body.
+        for (method in listOf("PUT", "DELETE", "PATCH")) {
+            val response = rawRequest(port, "$method /api/transactions")
+            assertEquals(405, response.status, response.raw)
+            assertMatchesSchema(response.body, "api-error.schema.json")
+            assertEquals("method not allowed", response.message())
+        }
+        val unacceptable = rawRequest(port, "GET /api/transactions", listOf("Accept: text/html"))
+        assertEquals(406, unacceptable.status, unacceptable.raw)
+        assertMatchesSchema(unacceptable.body, "api-error.schema.json")
+        assertEquals("no acceptable response media type", unacceptable.message())
+    }
+
+    @Test
+    fun `a malformed Content-Type cannot make the error handler itself fail`() = withRawServer({
+        // No ContentNegotiation: receive() fails, and the handler for that failure must not re-parse
+        // the header unguarded - a throw inside StatusPages escapes as a plain-text engine 500.
+        configureErrorHandling()
+        routing { transactionRoutes(TransactionService(TransactionRepository(Database.open(dbFile)))) }
+    }) { port ->
+        val malformed = rawRequest(port, "POST /api/transactions", listOf("Content-Type: not a mime type"), validRequest)
+        assertEquals(400, malformed.status, malformed.raw)
+        assertTrue(malformed.hasHeader("Content-Type: application/json"), malformed.raw)
+        assertMatchesSchema(malformed.body, "api-error.schema.json")
+        assertEquals("malformed Content-Type header", malformed.message())
+        assertTrue(!malformed.body.contains("not a mime type"), malformed.body)
+
+        // The genuine misconfiguration this handler exists for still reports a server fault.
+        val declared = rawRequest(port, "POST /api/transactions", listOf("Content-Type: application/json"), validRequest)
+        assertEquals(500, declared.status, declared.raw)
+        assertMatchesSchema(declared.body, "api-error.schema.json")
     }
 
     @Test
@@ -474,7 +507,9 @@ class TransactionRoutesTest {
     @Test
     fun `POST missing field and unknown field are 400`() = withApp {
         assertBadRequest("""{"description":"x","type":"DEBIT"}""", "missing required fields: amount")
-        assertBadRequest("""{"description":"x","amount":{"amount":"100"},"type":"DEBIT"}""", "missing required fields: currency")
+        // MoneyDto.amount and CreateTransactionRequest.amount share a name; the path has to tell them apart.
+        assertBadRequest("""{"description":"x","amount":{"currency":"USD"},"type":"DEBIT"}""", "missing required fields: amount.amount")
+        assertBadRequest("""{"description":"x","amount":{"amount":"100"},"type":"DEBIT"}""", "missing required fields: amount.currency")
         assertBadRequest("""{"amount":{"amount":"100","currency":"USD"}}""", "missing required fields: description, type")
         assertBadRequest("""{"description":"x","amount":{"amount":"100","currency":"USD"},"type":"DEBIT","extra":1}""", "malformed request body")
     }

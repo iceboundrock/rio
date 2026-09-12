@@ -15,23 +15,23 @@ import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.CannotTransformContentToTypeException
 import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.request.contentType
 import io.ktor.server.response.respond
-import io.ktor.util.AttributeKey
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.MissingFieldException
 import kotlinx.serialization.json.Json
-
-// The route declares what it can receive, independently of converter installation.
-val ExpectedRequestContentType = AttributeKey<ContentType>("ExpectedRequestContentType")
 
 /**
  * Central exception -> HTTP mapping.
  *
  *   ValidationException, malformed JSON  -> 400 VALIDATION_ERROR
+ *   malformed Accept header              -> 400 VALIDATION_ERROR, before routing (ValidateAccept below)
  *   unsupported request content type     -> 415 VALIDATION_ERROR
  *   NotFoundException, unmatched route   -> 404 NOT_FOUND
+ *   method not routed, Accept unsatisfied -> 405 / 406 VALIDATION_ERROR (framework-generated statuses)
  *   anything else                        -> 500 INTERNAL_ERROR (logged, message not exposed)
+ *
+ * This also installs request-side Accept validation, which can turn a request that would have
+ * succeeded into a 400. Response shaping and that rejection share this file so they cannot drift.
  */
 @OptIn(ExperimentalSerializationApi::class)
 fun Application.configureErrorHandling() {
@@ -49,7 +49,7 @@ fun Application.configureErrorHandling() {
             val missing = causes.filterIsInstance<MissingFieldException>().firstOrNull()
             val message = when {
                 causes.any { it is BadContentTypeFormatException } -> "malformed Content-Type header"
-                missing != null -> "missing required fields: ${missing.missingFields.joinToString()}"
+                missing != null -> "missing required fields: ${missing.describeFields()}"
                 else -> "malformed request body"
             }
             call.respondApiError(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, message))
@@ -58,13 +58,22 @@ fun Application.configureErrorHandling() {
             call.respondUnsupportedContentType()
         }
         exception<CannotTransformContentToTypeException> { call, e ->
+            // ApplicationRequest.contentType() throws on a malformed header. Thrown here, inside a
+            // StatusPages handler, it would escape as the engine's default 500 echoing the raw header.
+            val declared = call.request.headers[HttpHeaders.ContentType]?.takeIf { it.isNotBlank() }
+            val actual = declared?.let { runCatching { ContentType.parse(it) }.getOrNull() }
             val expected = call.attributes.getOrNull(ExpectedRequestContentType)
-            if (expected != null && call.request.contentType().withoutParameters().match(expected)) {
-                call.application.log.warn("Request content transformation failed; check receive type and ContentNegotiation configuration", e)
-                call.respondApiError(HttpStatusCode.InternalServerError, ApiError(ApiError.INTERNAL_ERROR, "internal server error"))
-            } else {
-                call.application.log.debug("Unsupported request content type")
-                call.respondUnsupportedContentType()
+            when {
+                declared != null && actual == null ->
+                    call.respondApiError(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, "malformed Content-Type header"))
+                expected != null && actual?.withoutParameters()?.match(expected) == true -> {
+                    call.application.log.warn("Request content transformation failed; check receive type and ContentNegotiation configuration", e)
+                    call.respondApiError(HttpStatusCode.InternalServerError, ApiError(ApiError.INTERNAL_ERROR, "internal server error"))
+                }
+                else -> {
+                    call.application.log.debug("Unsupported request content type")
+                    call.respondUnsupportedContentType()
+                }
             }
         }
         exception<Throwable> { call, e ->
@@ -73,6 +82,15 @@ fun Application.configureErrorHandling() {
         }
         status(HttpStatusCode.NotFound) { call, status ->
             call.respondApiError(status, ApiError(ApiError.NOT_FOUND, "no matching route"))
+        }
+        // Routing and ContentNegotiation produce these without an exception, so they would otherwise
+        // answer with an empty body and break the "every error is an ApiError" contract.
+        status(HttpStatusCode.MethodNotAllowed) { call, status ->
+            call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, "method not allowed"))
+        }
+        status(HttpStatusCode.NotAcceptable) { call, status ->
+            // The request itself may already have been applied; only the response is unacceptable.
+            call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, "no acceptable response media type"))
         }
     }
     // Validate before route side effects, using the same syntax parser as ContentNegotiation.
@@ -85,6 +103,19 @@ fun Application.configureErrorHandling() {
             }
         }
     })
+}
+
+// Bare field names are ambiguous when a nested object reuses one: MoneyDto.amount and
+// CreateTransactionRequest.amount both report "amount". kotlinx appends the JSON path of the failing
+// object to the message, so qualify the names with it. A path is a schema fact, not a request value;
+// anything outside the schema-shaped character set is dropped rather than echoed.
+private val MISSING_FIELD_PATH = Regex("""missing at path: \$([A-Za-z0-9_.\[\]]*)$""")
+
+@OptIn(ExperimentalSerializationApi::class)
+private fun MissingFieldException.describeFields(): String {
+    val path = MISSING_FIELD_PATH.find(message.orEmpty())?.groupValues?.get(1).orEmpty().removePrefix(".")
+    val prefix = if (path.isEmpty()) "" else "$path."
+    return missingFields.joinToString { prefix + it }
 }
 
 private suspend fun ApplicationCall.respondApiError(status: HttpStatusCode, error: ApiError) {
