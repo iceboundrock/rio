@@ -812,10 +812,33 @@ class CardTransactionRoutesTest {
     }
 
     @Test
-    fun `POST array is all-or-nothing`() = withApp {
+    fun `POST array is all-or-nothing and names the failing item`() = withApp {
+        // Service-layer rules: the message is the single-object one behind the item's index.
         val blankSecond = secondRequest.replace("Ramen", "   ")
-        assertBadRequestArray("[$validRequest,$blankSecond]", "description must not be blank")
-        assertBadRequestArray("[$validRequest,${secondRequest.replace("1200", "0")}]", "amount must be positive")
+        assertBadRequestArray("[$validRequest,$blankSecond]", "[1]: description must not be blank")
+        assertBadRequestArray("[$validRequest,${secondRequest.replace("1200", "0")}]", "[1]: amount must be positive")
+        assertBadRequestArray("[${validRequest.replace("1800", "-1800")},$secondRequest]", "[0]: amount must be positive")
+    }
+
+    @Test
+    fun `POST array wire-to-domain failures name the failing item`() = withApp {
+        // Route-layer conversion runs before the service; it has to carry the index too.
+        assertBadRequestArray("[$validRequest,${secondRequest.replace("1200", "99999999999999999999")}]", "[1]: amount is out of range for a 64-bit integer")
+        assertBadRequestArray("[$validRequest,${secondRequest.replace("1200", "12.00")}]", "[1]: amount must be a base-10 integer string in minor units")
+        assertBadRequestArray("[$validRequest,${secondRequest.replace("JPY", "XXX")}]", "[1]: unsupported currency")
+        assertBadRequestArray("[${validRequest.replace("DEBIT", "REFUND")},$secondRequest]", "[0]: type must be one of")
+    }
+
+    @Test
+    fun `POST single object errors carry no item index`() = withApp {
+        for (body in listOf(
+            validRequest.replace("Lunch", "   "),
+            validRequest.replace("1800", "0"),
+            validRequest.replace("1800", "99999999999999999999"),
+        )) {
+            val message = JSON.parseObject(postJson(body).bodyAsText()).getString("message")
+            assertTrue(!message.startsWith("["), "single-object message must not be indexed: $message")
+        }
     }
 
     @Test

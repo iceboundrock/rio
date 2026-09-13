@@ -122,8 +122,9 @@ the latter before the route runs.
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
 
 An array body must have at least one item and is inserted in one database transaction: if any item is
-invalid the request is 400 and nothing is persisted. Any other JSON kind (`true`, `"x"`, `42`, `null`) is
-`malformed request body`.
+invalid the request is 400 and nothing is persisted. The message names the failing item by its 0-based
+position, followed by the single-object message: `[1]: amount must be positive`. Any other JSON kind
+(`true`, `"x"`, `42`, `null`) is `malformed request body`.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
