@@ -33,7 +33,9 @@ dependencies {
 
 // Toolchain JDK. Local builds pin 25; CI overrides via ORG_GRADLE_PROJECT_jdkVersion to
 // also cover the older LTS releases (21, 17).
-val jdkVersion = (findProperty("jdkVersion") as String?)?.toInt() ?: 25
+val jdkVersion = findProperty("jdkVersion")?.toString()?.let { raw ->
+    raw.toIntOrNull() ?: throw GradleException("jdkVersion must be a JDK major version such as 25, got '$raw'")
+} ?: 25
 
 kotlin {
     jvmToolchain(jdkVersion)
