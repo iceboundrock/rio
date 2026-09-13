@@ -266,10 +266,11 @@ class TransferService(jdbc: JdbcTemplate) : TransactionalService(jdbc) {
 }
 ```
 
-A repository built from `jdbc` instead of `tx` would auto-commit on its own connection and escape the
-rollback. A failure anywhere in the block rolls back all statements; success commits them together.
-Single-statement reads and writes can use a repository built from `jdbc` directly; SQLite already makes
-each statement atomic. Keep SQL in repositories and validation in services. Nested transactions are
+A repository built from the template instead of `tx` would auto-commit on its own connection and escape
+the rollback, so the base class keeps its template private: inside a member function only `tx` resolves.
+A failure anywhere in the block rolls back all statements; success commits them together.
+Single-statement reads and writes use a repository built from the constructor parameter in a property
+initializer (see `CardTransactionService.repository`); SQLite already makes each statement atomic. Keep SQL in repositories and validation in services. Nested transactions are
 outside the starter scope.
 
 Optional operations are `queryForObject` (exactly one row), `extract` (consume a ResultSet),
