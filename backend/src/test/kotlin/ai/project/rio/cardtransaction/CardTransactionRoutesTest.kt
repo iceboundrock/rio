@@ -588,6 +588,23 @@ class CardTransactionRoutesTest {
         assertBadRequest("""{"description":"   ","amount":{"amount":"100","currency":"USD"},"type":"DEBIT"}""", "description")
     }
 
+    /**
+     * Blank is what the contract's `pattern: "\S"` says it is, in ECMAScript terms: U+FEFF and the
+     * Unicode space separators count, U+001C does not. Kotlin's isBlank disagrees on both counts, and
+     * a description it accepted would come back to the browser as a response Ajv rejects.
+     */
+    @Test
+    fun `POST description blank by the contract is 400 and trimmed by the same rule`() = withApp {
+        for (blank in listOf("\uFEFF", "\u00A0", "\u2003\u3000", " \uFEFF\u2028 ")) {
+            assertBadRequest(validRequest.replace("Lunch", blank), "description")
+        }
+        val response = postJson(validRequest.replace("Lunch", "\uFEFF \\u001CLunch\u3000"))
+        assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
+        val body = response.bodyAsText()
+        assertMatchesSchema(body, "card-transaction.schema.json")
+        assertEquals("\u001CLunch", JSON.parseObject(body).getString("description"))
+    }
+
     @Test
     fun `POST zero amount is 400`() = withApp {
         assertBadRequest("""{"description":"x","amount":{"amount":"0","currency":"USD"},"type":"DEBIT"}""", "amount must be positive")
@@ -609,19 +626,55 @@ class CardTransactionRoutesTest {
     }
 
     /**
-     * fastjson2 binds a JSON number into a String field by stringifying it, so the backend accepts a
-     * body the contract forbids. contracts/schemas is what rejects it - Ajv in the browser before the
-     * request is sent, and this assertion after - not the parser.
+     * fastjson2 would bind a JSON number, boolean, object or array into a String field by stringifying
+     * it; the contract types every scalar as string, so the converter's String reader refuses them.
+     * Each case would otherwise persist and answer 201.
      */
     @Test
-    fun `POST numeric JSON amount is coerced to a string`() = withApp {
-        val body = """{"description":"x","amount":{"amount":1800,"currency":"USD"},"type":"DEBIT"}"""
-        assertViolatesSchema(body, "create-card-transaction-request.schema.json")
+    fun `POST non-string scalars are 400 for every string field`() = withApp {
+        val fields = listOf("\"description\":\"Lunch\"" to "description", "\"amount\":\"1800\"" to "amount", "\"currency\":\"USD\"" to "currency", "\"type\":\"DEBIT\"" to "type")
+        val kinds = listOf("1800", "1.5", "true", "null", "{\"secret-hunter2\":1}", "[\"Lunch\"]", "{}", "[]")
+        for ((field, name) in fields) {
+            for (kind in kinds) {
+                val body = validRequest.replace(field, "\"$name\":$kind").also { check(it != validRequest) }
+                assertViolatesSchema(body, "create-card-transaction-request.schema.json")
+                assertMalformedBody(body)
+                assertMalformedBody("[$body]")
+            }
+        }
+    }
+
+    /**
+     * fastjson2 parses comments and trailing commas as if they were JSON; RFC 8259 has neither, and
+     * the README promises 400 for malformed JSON, so the converter checks the grammar first.
+     */
+    @Test
+    fun `POST non-RFC 8259 syntax is 400`() = withApp {
+        for (body in listOf(
+            validRequest.dropLast(1) + ",}",
+            validRequest.replace("\"USD\"}", "\"USD\",}"),
+            "[$validRequest,]",
+            "$validRequest/* secret-hunter2 */",
+            validRequest.replace("\"Lunch\",", "\"Lunch\",/* secret-hunter2 */"),
+            "$validRequest// secret-hunter2",
+            "// secret-hunter2\n$validRequest",
+            validRequest.replace("\"Lunch\",", "\"Lunch\",// secret-hunter2\n"),
+            "\uFEFF$validRequest",
+            "$validRequest$validRequest",
+        )) {
+            assertMalformedBody(body)
+        }
+    }
+
+    private suspend fun ApplicationTestBuilder.assertMalformedBody(body: String) {
+        val before = listIds()
         val response = postJson(body)
-        assertEquals(HttpStatusCode.Created, response.status)
-        val created = response.bodyAsText()
-        assertMatchesSchema(created, "card-transaction.schema.json")
-        assertEquals("1800", JSON.parseObject(created).getJSONObject("amount").getString("amount"))
+        assertEquals(HttpStatusCode.BadRequest, response.status, "body: $body -> ${response.bodyAsText()}")
+        val text = response.bodyAsText()
+        assertMatchesSchema(text, "api-error.schema.json")
+        assertEquals("malformed request body", JSON.parseObject(text).getString("message"), "body: $body")
+        assertTrue(!text.contains("secret-hunter2"), "request input leaked: $text")
+        assertEquals(before, listIds(), "a rejected body must not persist anything: $body")
     }
 
     @Test
@@ -704,23 +757,6 @@ class CardTransactionRoutesTest {
             assertMatchesSchema(text, "api-error.schema.json")
             assertEquals("malformed request body", JSON.parseObject(text).getString("message"))
         }
-    }
-
-    /**
-     * A JSON object where a string is expected is stringified by fastjson2 rather than rejected, so
-     * this request succeeds and the created resource carries the caller's own text back. It is the
-     * caller's value, not server state; what must never appear is a server diagnostic, which the
-     * unknown-key case above covers.
-     */
-    @Test
-    fun `POST object-valued description is coerced to its JSON text`() = withApp {
-        val body = validRequest.replace("\"description\":\"Lunch\"", "\"description\":{\"secret-hunter2\":1}")
-        assertViolatesSchema(body, "create-card-transaction-request.schema.json")
-        val response = postJson(body)
-        assertEquals(HttpStatusCode.Created, response.status)
-        val created = response.bodyAsText()
-        assertMatchesSchema(created, "card-transaction.schema.json")
-        assertEquals("""{"secret-hunter2":1}""", JSON.parseObject(created).getString("description"))
     }
 
     // ---- Array body: several card transactions created all-or-nothing ----

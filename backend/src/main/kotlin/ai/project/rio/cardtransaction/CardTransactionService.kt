@@ -3,6 +3,7 @@ package ai.project.rio.cardtransaction
 import ai.project.rio.db.JdbcTemplate
 import ai.project.rio.db.TransactionalService
 import ai.project.rio.http.NotFoundException
+import ai.project.rio.http.EcmaScript
 import ai.project.rio.http.ValidationException
 import ai.project.rio.money.Money
 import java.time.Clock
@@ -41,11 +42,14 @@ class CardTransactionService(
     }
 
     private fun validated(item: NewCardTransaction, createdAt: Instant): CardTransaction {
-        if (item.description.isBlank()) throw ValidationException("description must not be blank")
+        // Blank means the contract's `pattern: "\S"` would fail, so whitespace is ECMAScript's set,
+        // not Kotlin's; the same set is trimmed so what is stored is what the check looked at.
+        val description = item.description.trim(EcmaScript::isWhitespace)
+        if (description.isEmpty()) throw ValidationException("description must not be blank")
         if (!item.amount.isPositive) throw ValidationException("amount must be positive")
         return CardTransaction(
             id = UUID.randomUUID().toString(),
-            description = item.description.trim(),
+            description = description,
             amount = item.amount,
             type = item.type,
             status = CardTransactionStatus.COMPLETED,

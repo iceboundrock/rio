@@ -66,9 +66,11 @@ backend/src/main/kotlin/ai/project/rio/
   db/                  Database (SQLite connection setup), JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
   cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire)
-  http/                ApiError, ErrorHandling (exception -> status mapping), JsonConverter (fastjson2 <-> HTTP bodies)
+  http/                ApiError, ErrorHandling (exception -> status mapping), JsonConverter (fastjson2 <-> HTTP bodies),
+                       JsonSyntax (RFC 8259 grammar check), EcmaScript (the whitespace set JSON Schema `\s` means)
 backend/src/test/...   MoneyTest, JdbcTemplateTest, TransactionalServiceTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
-                       contract/JsonSchemaAssertions (fastjson2 JSONSchema over ../contracts/schemas with $refs inlined), JsonSchemaAssertionsTest
+                       contract/JsonSchemaAssertions (fastjson2 JSONSchema over ../contracts/schemas with $refs inlined and
+                       `pattern`s translated from ECMAScript to Java regex), JsonSchemaAssertionsTest, EcmaScriptPatternsTest, JsonSyntaxTest
 frontend/src/
   api/                 client.ts (fetch + validate), schemas.ts (Ajv validators), cardTransactions.ts (endpoints)
   money/               money.ts (bigint Money, formatting), money.test.ts
@@ -123,10 +125,13 @@ invalid the request is 400 and nothing is persisted. Any other JSON kind (`true`
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
 A malformed `Content-Type` header returns 400 with `malformed Content-Type header`.
-A body that cannot be read - malformed JSON, a missing or unknown field, the wrong JSON kind - returns
-400 with `malformed request body` and names nothing from the input. A JSON number, boolean or object
-where the contract says string is stringified by the parser (fastjson2) and accepted; the schema is
-what rejects it, in the browser (Ajv) before sending and in the backend tests after answering.
+A body that cannot be read - not RFC 8259 JSON (comments, trailing commas and a byte order mark
+included, which fastjson2 alone would accept), a missing or unknown field, the wrong JSON kind for a
+field (a number, boolean, object or array where the contract says string) - returns 400 with
+`malformed request body` and names nothing from the input.
+A description is blank when every character is ECMAScript whitespace, the set the contract's
+`pattern: "\S"` means; that includes U+00A0 and U+FEFF and excludes U+001C..U+001F, unlike Kotlin's
+`isBlank`. The stored description is trimmed by the same set.
 Validation error *responses* describe constraints without echoing request values; server logs are
 not redacted and still record the full request line.
 A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.
@@ -241,7 +246,7 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | JSON amounts as integer *strings* | JS `number` can't hold all 64-bit values; strings can. |
 | `bigint` in the browser | Same reason; formatting is done on digits, not floats. |
 | Hand-written DTOs and TS wire types | No code generation step; fastjson2 binds the DTO constructors, the schema tests catch drift. |
-| Shared JSON Schema, validated on both sides | One contract, executable in backend tests (fastjson2 `JSONSchema`, `$ref`s inlined at load) and at frontend runtime (Ajv). |
+| Shared JSON Schema, validated on both sides | One contract, executable in backend tests (fastjson2 `JSONSchema`, `$ref`s inlined and `pattern`s rewritten from ECMAScript to Java regex at load, RFC 8259 grammar checked before validating) and at frontend runtime (Ajv). |
 | Thin layers, no interfaces-with-one-impl, no DI | Small enough to hold in your head. |
 | `TransactionalService` base class for services that write more than one row | One place that knows how to start a transaction; services stay free of connection handling and repositories stay free of business rules. |
 | One `POST /api/card-transactions` accepting an object or an array | No second endpoint to keep in sync; the array form exercises the transactional path end to end. |

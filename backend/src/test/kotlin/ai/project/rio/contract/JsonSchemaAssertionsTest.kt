@@ -103,6 +103,27 @@ class JsonSchemaAssertionsTest {
         assertViolatesSchema(transaction("COMPLETED" to "NEW"), "card-transaction.schema.json")
     }
 
+    /**
+     * fastjson2 compiles `pattern` as a Java regex and matches with find(); the schema means ECMAScript.
+     * Without translation the first two documents validate here and fail in the browser.
+     */
+    @Test
+    fun `patterns are read with ECMAScript semantics`() {
+        assertViolatesSchema(transaction("\"Lunch\"" to "\"\uFEFF\""), "card-transaction.schema.json")
+        assertViolatesSchema(transaction("\"1800\"" to "\"1800\\n\""), "card-transaction.schema.json")
+        assertViolatesSchema(request("\"Lunch\"" to "\"\u00A0\u2003\u3000\""), "create-card-transaction-request.schema.json")
+        assertMatchesSchema(request("\"Lunch\"" to "\"\\u001C\""), "create-card-transaction-request.schema.json")
+    }
+
+    /** JSON.parse alone accepts these; the browser's JSON.parse does not, so neither may the oracle. */
+    @Test
+    fun `non-RFC 8259 text is not JSON to the oracle`() {
+        for (text in listOf("$money/* c */", money.dropLast(1) + ",}", "// c\n$money", "$money // c")) {
+            assertFailsWith<AssertionError>(text) { assertMatchesSchema(text, "money.schema.json") }
+            assertFailsWith<AssertionError>(text) { assertViolatesSchema(text, "money.schema.json") }
+        }
+    }
+
     @Test
     fun `api error keywords are enforced`() {
         assertViolatesSchema("""{"code":"NOPE","message":"x"}""", "api-error.schema.json")

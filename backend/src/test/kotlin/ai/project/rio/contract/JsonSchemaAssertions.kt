@@ -1,5 +1,6 @@
 package ai.project.rio.contract
 
+import ai.project.rio.http.JsonSyntax
 import com.alibaba.fastjson2.JSON
 import com.alibaba.fastjson2.JSONArray
 import com.alibaba.fastjson2.JSONObject
@@ -15,8 +16,10 @@ import kotlin.test.fail
  * fastjson2's JSONSchema resolves only same-document `$ref`s (`#`, `#/$defs/<name>`), and a `$ref`
  * it cannot resolve becomes a reference that validates *anything*: a contract would silently stop
  * being enforced. So every `$ref` is replaced here, before fastjson2 sees the schema, by a copy of
- * what it points at, and anything this loader cannot resolve is an error rather than a pass.
- * JsonSchemaAssertionsTest is the proof that each keyword, and each cross-file reference, still bites.
+ * what it points at, and anything this loader cannot resolve is an error rather than a pass. Each
+ * `pattern` is rewritten by [EcmaScriptPatterns] on the way, because fastjson2 compiles it as a Java
+ * regex while the schema (and Ajv in the browser) means ECMAScript. JsonSchemaAssertionsTest is the
+ * proof that each keyword, and each cross-file reference, still bites.
  */
 object JsonSchemaAssertions {
 
@@ -55,8 +58,10 @@ object JsonSchemaAssertions {
         }
     }
 
+    // JsonSyntax first: JSON.parse alone would let a response with a comment or trailing comma reach
+    // the validator, and the browser's parser would have rejected it.
     private fun parse(json: String, fileName: String): Any? =
-        runCatching { JSON.parse(json) }.getOrElse {
+        runCatching { JsonSyntax.requireStrict(json); JSON.parse(json) }.getOrElse {
             fail("not JSON, so it cannot be checked against $fileName: ${it.message}\nJSON was:\n$json")
         }
 
@@ -70,7 +75,14 @@ object JsonSchemaAssertions {
             val ref = node["\$ref"]
             when {
                 ref == null -> JSONObject().also { copy ->
-                    for ((key, value) in node) if (key !in FILE_KEYS) copy[key] = inline(value, fileName, refs)
+                    for ((key, value) in node) {
+                        copy[key] = when {
+                            key in FILE_KEYS -> continue
+                            // A `pattern` keyword is a string; a property called "pattern" is an object.
+                            key == "pattern" && value is String -> EcmaScriptPatterns.toJava(value)
+                            else -> inline(value, fileName, refs)
+                        }
+                    }
                 }
                 // 2020-12 allows keywords beside a $ref; these contracts never use them, and silently
                 // dropping them would weaken a schema, so refuse instead of guessing.
