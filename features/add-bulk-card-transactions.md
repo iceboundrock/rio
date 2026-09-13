@@ -41,3 +41,5 @@ would each have to re-invent the wiring. There was also no way to create several
   `[1].amount.currency`; decoding the tree directly would report a bare `currency`. Cost: the body is parsed twice.
 - Validation happens inside the transaction, per item, so a bad item N rolls back inserts 1..N-1 without a separate pre-pass.
 - The list page re-fetches after a successful create instead of merging the returned items: the server assigns `createdAt` and the order.
+- Only the newest fetch may set the list state (`pages/latestRequest.ts`): the initial GET can still be in flight when the
+  post-create refresh returns, and must not overwrite it with a stale list.

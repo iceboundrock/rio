@@ -4,6 +4,7 @@ import { describeError } from "../api/errors";
 import CardTransactionList from "../components/CardTransactionList";
 import CreateCardTransactionsForm from "../components/CreateCardTransactionsForm";
 import type { CardTransaction } from "../types/cardTransaction";
+import { latestRequest } from "./latestRequest";
 
 type State =
   | { kind: "loading" }
@@ -12,19 +13,23 @@ type State =
 
 export default function CardTransactionListPage() {
   const [state, setState] = useState<State>({ kind: "loading" });
+  // Only the newest fetch may set state: the initial GET can still be in flight when the
+  // post-create refresh returns, and must not overwrite that fresher list.
+  const [requests] = useState(latestRequest);
 
   // Re-fetch rather than merge what the form returns: the server assigns createdAt and the order.
   const load = useCallback(() => {
-    let cancelled = false;
-    getCardTransactions()
-      .then((cardTransactions) => !cancelled && setState({ kind: "loaded", cardTransactions }))
-      .catch((error: unknown) => !cancelled && setState({ kind: "error", message: describeError(error) }));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    requests.run(
+      getCardTransactions,
+      (cardTransactions) => setState({ kind: "loaded", cardTransactions }),
+      (error) => setState({ kind: "error", message: describeError(error) }),
+    );
+  }, [requests]);
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    return () => requests.cancel();
+  }, [load, requests]);
 
   return (
     <>
