@@ -1,4 +1,4 @@
-package ai.project.rio.transaction
+package ai.project.rio.cardtransaction
 
 import ai.project.rio.http.ValidationException
 import ai.project.rio.money.Currency
@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 data class MoneyDto(val amount: String, val currency: String)
 
 @Serializable
-data class TransactionDto(
+data class CardTransactionDto(
     val id: String,
     val description: String,
     val amount: MoneyDto,
@@ -22,10 +22,10 @@ data class TransactionDto(
 )
 
 @Serializable
-data class TransactionListResponse(val items: List<TransactionDto>)
+data class CardTransactionListResponse(val items: List<CardTransactionDto>)
 
 @Serializable
-data class CreateTransactionRequest(
+data class CreateCardTransactionRequest(
     val description: String,
     val amount: MoneyDto,
     val type: String,
@@ -35,7 +35,7 @@ data class CreateTransactionRequest(
 
 fun Money.toDto(): MoneyDto = MoneyDto(amount = amount.toString(), currency = currency.code)
 
-fun Transaction.toDto(): TransactionDto = TransactionDto(
+fun CardTransaction.toDto(): CardTransactionDto = CardTransactionDto(
     id = id,
     description = description,
     amount = amount.toDto(),
@@ -59,6 +59,6 @@ fun MoneyDto.toMoney(): Money {
     return Money(minor, currency)
 }
 
-fun parseTransactionType(value: String): TransactionType =
-    TransactionType.entries.firstOrNull { it.name == value }
-        ?: throw ValidationException("type must be one of ${TransactionType.entries.joinToString()}")
+fun parseCardTransactionType(value: String): CardTransactionType =
+    CardTransactionType.entries.firstOrNull { it.name == value }
+        ?: throw ValidationException("type must be one of ${CardTransactionType.entries.joinToString()}")

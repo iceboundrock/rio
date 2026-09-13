@@ -50,7 +50,7 @@ h1 {
   border-color: #fecaca;
 }
 
-table.transactions {
+table.card-transactions {
   width: 100%;
   border-collapse: collapse;
   background: #fff;
@@ -59,14 +59,14 @@ table.transactions {
   overflow: hidden;
 }
 
-.transactions th,
-.transactions td {
+.card-transactions th,
+.card-transactions td {
   padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid #f0f0f0;
 }
 
-.transactions th {
+.card-transactions th {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -74,16 +74,16 @@ table.transactions {
   background: #fafafa;
 }
 
-.transactions .num {
+.card-transactions .num {
   text-align: right;
 }
 
-.transaction-row {
+.card-transaction-row {
   cursor: pointer;
 }
 
-.transaction-row:hover,
-.transaction-row:focus {
+.card-transaction-row:hover,
+.card-transaction-row:focus {
   background: #f3f4f6;
   outline: none;
 }

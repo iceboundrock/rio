@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rio.local/schemas/transaction.schema.json",
-  "title": "Transaction",
+  "$id": "https://rio.local/schemas/card-transaction.schema.json",
+  "title": "CardTransaction",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "description", "amount", "type", "status", "createdAt"],

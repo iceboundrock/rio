@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   validateApiError,
-  validateCreateTransactionRequest,
+  validateCreateCardTransactionRequest,
   validateMoney,
-  validateTransaction,
-  validateTransactionListResponse,
+  validateCardTransaction,
+  validateCardTransactionListResponse,
 } from "./schemas";
 
 // These tests prove the frontend is using the real shared schemas and that contract drift fails loudly.
 
-const validTransaction = {
+const validCardTransaction = {
   id: "seed-0002",
   description: "Blue Bottle Coffee",
   amount: { amount: "525", currency: "USD" },
@@ -37,34 +37,34 @@ describe("money schema", () => {
   });
 });
 
-describe("transaction schemas", () => {
+describe("card transaction schemas", () => {
   it("accept the documented shapes", () => {
-    expect(validateTransaction(validTransaction)).toBe(true);
-    expect(validateTransactionListResponse({ items: [validTransaction] })).toBe(true);
-    expect(validateTransactionListResponse({ items: [] })).toBe(true);
-    expect(validateCreateTransactionRequest({ description: "Lunch", amount: { amount: "1800", currency: "USD" }, type: "DEBIT" })).toBe(true);
+    expect(validateCardTransaction(validCardTransaction)).toBe(true);
+    expect(validateCardTransactionListResponse({ items: [validCardTransaction] })).toBe(true);
+    expect(validateCardTransactionListResponse({ items: [] })).toBe(true);
+    expect(validateCreateCardTransactionRequest({ description: "Lunch", amount: { amount: "1800", currency: "USD" }, type: "DEBIT" })).toBe(true);
   });
 
-  it("require positive magnitudes for transactions", () => {
-    expect(validateTransaction({ ...validTransaction, amount: { amount: "0", currency: "USD" } })).toBe(false);
-    expect(validateTransaction({ ...validTransaction, amount: { amount: "-525", currency: "USD" } })).toBe(false);
-    expect(validateCreateTransactionRequest({ description: "x", amount: { amount: "-1", currency: "USD" }, type: "DEBIT" })).toBe(false);
+  it("require positive magnitudes for card transactions", () => {
+    expect(validateCardTransaction({ ...validCardTransaction, amount: { amount: "0", currency: "USD" } })).toBe(false);
+    expect(validateCardTransaction({ ...validCardTransaction, amount: { amount: "-525", currency: "USD" } })).toBe(false);
+    expect(validateCreateCardTransactionRequest({ description: "x", amount: { amount: "-1", currency: "USD" }, type: "DEBIT" })).toBe(false);
   });
 
   it("reject drift: numeric amount, lowercase currency, unknown status, extra fields, missing fields", () => {
-    expect(validateTransaction({ ...validTransaction, amount: { amount: 525, currency: "USD" } })).toBe(false);
-    expect(validateTransaction({ ...validTransaction, amount: { amount: "525", currency: "usd" } })).toBe(false);
-    expect(validateTransaction({ ...validTransaction, status: "REVERSED" })).toBe(false);
-    expect(validateTransaction({ ...validTransaction, category: "Food" })).toBe(false);
-    const { createdAt: _omitted, ...missingCreatedAt } = validTransaction;
-    expect(validateTransaction(missingCreatedAt)).toBe(false);
-    expect(validateTransactionListResponse({ items: [validTransaction], total: 1 })).toBe(false);
+    expect(validateCardTransaction({ ...validCardTransaction, amount: { amount: 525, currency: "USD" } })).toBe(false);
+    expect(validateCardTransaction({ ...validCardTransaction, amount: { amount: "525", currency: "usd" } })).toBe(false);
+    expect(validateCardTransaction({ ...validCardTransaction, status: "REVERSED" })).toBe(false);
+    expect(validateCardTransaction({ ...validCardTransaction, category: "Food" })).toBe(false);
+    const { createdAt: _omitted, ...missingCreatedAt } = validCardTransaction;
+    expect(validateCardTransaction(missingCreatedAt)).toBe(false);
+    expect(validateCardTransactionListResponse({ items: [validCardTransaction], total: 1 })).toBe(false);
   });
 });
 
 describe("api error schema", () => {
   it("accepts known codes only", () => {
-    expect(validateApiError({ code: "NOT_FOUND", message: "transaction x not found" })).toBe(true);
+    expect(validateApiError({ code: "NOT_FOUND", message: "card transaction x not found" })).toBe(true);
     expect(validateApiError({ code: "TEAPOT", message: "short and stout" })).toBe(false);
     expect(validateApiError({ code: "NOT_FOUND" })).toBe(false);
   });

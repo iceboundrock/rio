@@ -1,14 +1,14 @@
 import { Navigate, Route, Routes } from "react-router";
-import TransactionListPage from "./pages/TransactionListPage";
-import TransactionDetailsPage from "./pages/TransactionDetailsPage";
+import CardTransactionListPage from "./pages/CardTransactionListPage";
+import CardTransactionDetailsPage from "./pages/CardTransactionDetailsPage";
 
 export default function App() {
   return (
     <main className="app">
       <Routes>
-        <Route path="/" element={<Navigate to="/transactions" replace />} />
-        <Route path="/transactions" element={<TransactionListPage />} />
-        <Route path="/transactions/:id" element={<TransactionDetailsPage />} />
+        <Route path="/" element={<Navigate to="/card-transactions" replace />} />
+        <Route path="/card-transactions" element={<CardTransactionListPage />} />
+        <Route path="/card-transactions/:id" element={<CardTransactionDetailsPage />} />
         <Route path="*" element={<p className="state state-error">Page not found.</p>} />
       </Routes>
     </main>

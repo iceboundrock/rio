@@ -1,6 +1,6 @@
 package ai.project.rio.db
 
-import ai.project.rio.transaction.TransactionRepository
+import ai.project.rio.cardtransaction.CardTransactionRepository
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.AfterTest
@@ -27,19 +27,19 @@ class SchemaInitializerTest {
 
     private fun storedDdl(): String = jdbc.queryForObject(
         "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
-        listOf("table", "transactions"),
+        listOf("table", "card_transactions"),
     ) { it.getString("sql") }
 
     @Test
-    fun `fresh schema can be reopened without losing transactions`() {
+    fun `fresh schema can be reopened without losing card transactions`() {
         SchemaInitializer.initialize(jdbc)
         SchemaInitializer.seedIfEmpty(jdbc)
-        val before = TransactionRepository(jdbc).findAll()
+        val before = CardTransactionRepository(jdbc).findAll()
 
         SchemaInitializer.initialize(Database.open(dbFile))
 
         assertEquals(SchemaInitializer.SEED.size, before.size)
-        assertEquals(before, TransactionRepository(jdbc).findAll())
+        assertEquals(before, CardTransactionRepository(jdbc).findAll())
     }
 
     @Test
@@ -49,7 +49,7 @@ class SchemaInitializerTest {
         for (prefix in listOf("CREATE TABLE ", "create table if not exists ", "CREATE  TABLE\nIF  NOT\tEXISTS ")) {
             for (suffix in listOf("", ";", " \n", " \n; \n")) {
                 val ddl = prefix + body + suffix
-                jdbc.execute("DROP TABLE transactions")
+                jdbc.execute("DROP TABLE card_transactions")
                 jdbc.execute(ddl)
 
                 assertEquals(SchemaInitializer.canonicalDdl(ddl), SchemaInitializer.canonicalDdl(storedDdl()))
@@ -60,14 +60,14 @@ class SchemaInitializerTest {
 
     @Test
     fun `same-name view fails with reset instructions and remains intact`() {
-        jdbc.execute("CREATE VIEW transactions AS SELECT 1 AS id")
+        jdbc.execute("CREATE VIEW card_transactions AS SELECT 1 AS id")
 
         val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }
 
         assertTrue(error.message!!.contains("backend/data/rio.db"))
         assertTrue(error.message!!.contains("RIO_DB_PATH"))
         assertTrue(error.message!!.contains("restart"))
-        assertEquals(1, jdbc.queryForObject("SELECT id FROM transactions") { it.getInt("id") })
+        assertEquals(1, jdbc.queryForObject("SELECT id FROM card_transactions") { it.getInt("id") })
     }
 
     @Test
@@ -75,7 +75,7 @@ class SchemaInitializerTest {
         SchemaInitializer.initialize(jdbc)
         val ddl = storedDdl()
         for (literal in listOf("'usd'", "' USD '")) {
-            jdbc.execute("DROP TABLE transactions")
+            jdbc.execute("DROP TABLE card_transactions")
             val changedDdl = ddl.replace("'USD'", literal)
             jdbc.execute(changedDdl)
 
@@ -88,11 +88,11 @@ class SchemaInitializerTest {
     fun `old currency constraint fails at startup with reset instructions and preserves data`() {
         SchemaInitializer.initialize(jdbc)
         val oldDdl = storedDdl().replace("'BRL', 'CAD', 'CNY', 'EUR', 'JPY', 'USD'", "'USD', 'EUR', 'JPY'")
-        jdbc.execute("DROP TABLE transactions")
+        jdbc.execute("DROP TABLE card_transactions")
         jdbc.execute(oldDdl)
         // Model existing data using a currency accepted by the old schema.
-        TransactionRepository(jdbc).insert(SchemaInitializer.SEED.first())
-        val before = TransactionRepository(jdbc).findAll()
+        CardTransactionRepository(jdbc).insert(SchemaInitializer.SEED.first())
+        val before = CardTransactionRepository(jdbc).findAll()
 
         val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }
 
@@ -101,14 +101,14 @@ class SchemaInitializerTest {
         assertTrue(error.message!!.contains("RIO_DB_PATH"))
         assertTrue(error.message!!.contains("restart"))
         assertEquals(oldDdl, storedDdl())
-        assertEquals(before, TransactionRepository(jdbc).findAll())
+        assertEquals(before, CardTransactionRepository(jdbc).findAll())
     }
 
     @Test
     fun `non-currency DDL drift is also rejected`() {
         SchemaInitializer.initialize(jdbc)
         val changedDdl = storedDdl().replace("amount_minor > 0", "amount_minor >= 0")
-        jdbc.execute("DROP TABLE transactions")
+        jdbc.execute("DROP TABLE card_transactions")
         jdbc.execute(changedDdl)
 
         assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }

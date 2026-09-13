@@ -115,7 +115,7 @@ export function formatMoney(money: Money): string {
   return `${negative ? "-" : ""}${symbol}${grouped}${fraction}`;
 }
 
-/** Transaction display: DEBIT shows as an outflow ("-$5.00"), CREDIT as an inflow ("+$5.00"). */
+/** Card transaction display: DEBIT shows as an outflow ("-$5.00"), CREDIT as an inflow ("+$5.00"). */
 export function formatSignedMoney(money: Money, direction: "CREDIT" | "DEBIT"): string {
   return (direction === "DEBIT" ? "-" : "+") + formatMoney(money);
 }

@@ -1,4 +1,4 @@
-package ai.project.rio.transaction
+package ai.project.rio.cardtransaction
 
 import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
@@ -16,18 +16,18 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
-class TransactionRepositoryTest {
+class CardTransactionRepositoryTest {
 
     private lateinit var dbFile: Path
     private lateinit var jdbc: JdbcTemplate
-    private lateinit var repository: TransactionRepository
+    private lateinit var repository: CardTransactionRepository
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("transaction-repository-test", ".db")
+        dbFile = Files.createTempFile("card-transaction-repository-test", ".db")
         jdbc = Database.open(dbFile)
         SchemaInitializer.initialize(jdbc)
-        repository = TransactionRepository(jdbc)
+        repository = CardTransactionRepository(jdbc)
     }
 
     @AfterTest
@@ -35,17 +35,17 @@ class TransactionRepositoryTest {
         Files.deleteIfExists(dbFile)
     }
 
-    private val lunch = Transaction(
+    private val lunch = CardTransaction(
         id = "tx-1",
         description = "Lunch",
         amount = Money(1800, Currency.USD),
-        type = TransactionType.DEBIT,
-        status = TransactionStatus.COMPLETED,
+        type = CardTransactionType.DEBIT,
+        status = CardTransactionStatus.COMPLETED,
         createdAt = Instant.parse("2026-09-10T18:00:00Z"),
     )
 
     @Test
-    fun `insert then findById reconstructs the same Transaction including Money`() {
+    fun `insert then findById reconstructs the same CardTransaction including Money`() {
         repository.insert(lunch)
         val found = repository.findById("tx-1")
         assertEquals(lunch, found)
@@ -54,7 +54,7 @@ class TransactionRepositoryTest {
 
     @Test
     fun `currency and precision-free amount round-trip for JPY`() {
-        val yen = lunch.copy(id = "tx-jpy", amount = Money(24_800, Currency.JPY), status = TransactionStatus.PENDING)
+        val yen = lunch.copy(id = "tx-jpy", amount = Money(24_800, Currency.JPY), status = CardTransactionStatus.PENDING)
         repository.insert(yen)
         assertEquals(yen, repository.findById("tx-jpy"))
     }
@@ -62,13 +62,13 @@ class TransactionRepositoryTest {
     @Test
     fun `enums and timestamp round-trip`() {
         val declined = lunch.copy(
-            id = "tx-2", type = TransactionType.CREDIT, status = TransactionStatus.DECLINED,
+            id = "tx-2", type = CardTransactionType.CREDIT, status = CardTransactionStatus.DECLINED,
             createdAt = Instant.parse("2026-01-02T03:04:05.123Z"),
         )
         repository.insert(declined)
         val found = repository.findById("tx-2")!!
-        assertEquals(TransactionType.CREDIT, found.type)
-        assertEquals(TransactionStatus.DECLINED, found.status)
+        assertEquals(CardTransactionType.CREDIT, found.type)
+        assertEquals(CardTransactionStatus.DECLINED, found.status)
         assertEquals(Instant.parse("2026-01-02T03:04:05.123Z"), found.createdAt)
     }
 
@@ -104,9 +104,9 @@ class TransactionRepositoryTest {
     @Test
     fun `service joins a caller transaction and rolls back with other repository writes`() {
         assertFailsWith<SQLException> {
-            jdbc.transaction { tx ->
-                val scopedRepository = TransactionRepository(tx)
-                val service = TransactionService(scopedRepository)
+            jdbc.withTransaction { tx ->
+                val scopedRepository = CardTransactionRepository(tx)
+                val service = CardTransactionService(scopedRepository)
                 val created = service.create("Lunch", lunch.amount, lunch.type)
                 assertEquals(created, service.get(created.id))
                 scopedRepository.insert(lunch)
@@ -119,9 +119,9 @@ class TransactionRepositoryTest {
     @Test
     fun `repositories sharing an executor roll back together`() {
         assertFailsWith<SQLException> {
-            jdbc.transaction { tx ->
-                val first = TransactionRepository(tx)
-                val second = TransactionRepository(tx)
+            jdbc.withTransaction { tx ->
+                val first = CardTransactionRepository(tx)
+                val second = CardTransactionRepository(tx)
                 first.insert(lunch)
                 assertEquals(lunch, second.findById(lunch.id))
                 second.insert(lunch.copy(id = "tx-second"))

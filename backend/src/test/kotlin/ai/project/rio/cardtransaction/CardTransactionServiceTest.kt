@@ -1,4 +1,4 @@
-package ai.project.rio.transaction
+package ai.project.rio.cardtransaction
 
 import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
@@ -22,22 +22,22 @@ import kotlin.test.assertFailsWith
  * Service-focused integration tests: the concrete repository against a temporary SQLite file,
  * with a fixed clock so business rules (normalization, defaults, timestamps) are observable.
  */
-class TransactionServiceTest {
+class CardTransactionServiceTest {
 
     private val fixedInstant = Instant.parse("2026-09-13T12:34:56.789Z")
 
     private lateinit var dbFile: Path
     private lateinit var jdbc: JdbcTemplate
-    private lateinit var repository: TransactionRepository
-    private lateinit var service: TransactionService
+    private lateinit var repository: CardTransactionRepository
+    private lateinit var service: CardTransactionService
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("transaction-service-test", ".db")
+        dbFile = Files.createTempFile("card-transaction-service-test", ".db")
         jdbc = Database.open(dbFile)
         SchemaInitializer.initialize(jdbc)
-        repository = TransactionRepository(jdbc)
-        service = TransactionService(repository, Clock.fixed(fixedInstant, ZoneOffset.UTC))
+        repository = CardTransactionRepository(jdbc)
+        service = CardTransactionService(repository, Clock.fixed(fixedInstant, ZoneOffset.UTC))
     }
 
     @AfterTest
@@ -47,18 +47,18 @@ class TransactionServiceTest {
 
     @Test
     fun `create trims description, defaults status to COMPLETED, and stamps the fixed clock instant`() {
-        val created = service.create("  Lunch  ", Money(1800, Currency.USD), TransactionType.DEBIT)
+        val created = service.create("  Lunch  ", Money(1800, Currency.USD), CardTransactionType.DEBIT)
 
         assertEquals("Lunch", created.description)
-        assertEquals(TransactionStatus.COMPLETED, created.status)
+        assertEquals(CardTransactionStatus.COMPLETED, created.status)
         assertEquals(fixedInstant, created.createdAt)
         assertEquals(Money(1800, Currency.USD), created.amount)
-        assertEquals(TransactionType.DEBIT, created.type)
+        assertEquals(CardTransactionType.DEBIT, created.type)
     }
 
     @Test
-    fun `create persists exactly the transaction it returns`() {
-        val created = service.create("Salary", Money(500_000, Currency.JPY), TransactionType.CREDIT)
+    fun `create persists exactly the card transaction it returns`() {
+        val created = service.create("Salary", Money(500_000, Currency.JPY), CardTransactionType.CREDIT)
 
         assertEquals(created, repository.findById(created.id))
         assertEquals(listOf(created), repository.findAll())
@@ -67,7 +67,7 @@ class TransactionServiceTest {
     @Test
     fun `create rejects a blank description without inserting`() {
         assertFailsWith<ValidationException> {
-            service.create("   ", Money(1800, Currency.USD), TransactionType.DEBIT)
+            service.create("   ", Money(1800, Currency.USD), CardTransactionType.DEBIT)
         }
         assertEquals(emptyList(), repository.findAll())
     }
@@ -75,10 +75,10 @@ class TransactionServiceTest {
     @Test
     fun `create rejects zero and negative amounts without inserting`() {
         assertFailsWith<ValidationException> {
-            service.create("Lunch", Money(0, Currency.USD), TransactionType.DEBIT)
+            service.create("Lunch", Money(0, Currency.USD), CardTransactionType.DEBIT)
         }
         assertFailsWith<ValidationException> {
-            service.create("Lunch", Money(-5, Currency.USD), TransactionType.DEBIT)
+            service.create("Lunch", Money(-5, Currency.USD), CardTransactionType.DEBIT)
         }
         assertEquals(emptyList(), repository.findAll())
     }

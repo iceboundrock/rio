@@ -104,7 +104,7 @@ fun Application.configureErrorHandling() {
         }
     }
     // Validate before route side effects. A route that cannot be answered must not run: it would
-    // write, then fail negotiation, and the caller would read an error for a transaction that exists.
+    // write, then fail negotiation, and the caller would read an error for a card transaction that exists.
     install(createApplicationPlugin("ValidateAccept") {
         onCall { call ->
             // Whether this call answers 200 or 406 is decided by Accept, so a cache must key on it
@@ -199,7 +199,7 @@ private fun acceptsProducedType(ranges: List<ContentTypeWithQuality>): Boolean {
 }
 
 // Bare field names are ambiguous when a nested object reuses one: MoneyDto.amount and
-// CreateTransactionRequest.amount both report "amount". kotlinx appends the JSON path of the failing
+// CreateCardTransactionRequest.amount both report "amount". kotlinx appends the JSON path of the failing
 // object to the message, so qualify the names with it. A path is a schema fact, not a request value;
 // anything outside the schema-shaped character set is dropped rather than echoed.
 private val MISSING_FIELD_PATH = Regex("""missing at path: \$([A-Za-z0-9_.\[\]]*)$""")

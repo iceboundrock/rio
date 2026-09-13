@@ -10,7 +10,7 @@ class CurrencyMismatchException(a: Currency, b: Currency) :
 /**
  * An amount of money: integer `amount` in the currency's minor units plus the currency.
  *
- * Money may be negative. Business rules (e.g. transaction magnitude > 0) live in services.
+ * Money may be negative. Business rules (e.g. card transaction magnitude > 0) live in services.
  * All arithmetic is checked: overflowing a Long throws ArithmeticException instead of wrapping.
  */
 data class Money(val amount: Long, val currency: Currency) : Comparable<Money> {
