@@ -163,6 +163,9 @@ class TransactionRoutesTest {
         )
         val repository = TransactionRepository(Database.open(dbFile))
         for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
+            // Malformed and unacceptable Accept headers are both rejected before routing, so no target
+            // reaches its handler: the status describes the header, not what the route would have done.
+            val rejectedBeforeRouting = accept.startsWith("**") || accept == "text/plain"
             val countBefore = repository.findAll().size
             for ((target, type, normalStatus) in cases) {
                 val body = if (normalStatus == 201) validRequest else ""
@@ -170,7 +173,7 @@ class TransactionRoutesTest {
                 val response = rawRequest(port, target, headers, body)
                 val expectedStatus = when {
                     accept.startsWith("**") -> 400
-                    normalStatus in 200..299 && accept == "text/plain" -> 406
+                    accept == "text/plain" -> 406
                     else -> normalStatus
                 }
                 assertEquals(expectedStatus, response.status, response.raw)
@@ -184,28 +187,152 @@ class TransactionRoutesTest {
                 assertTrue(!response.body.contains("secret-marker") && !response.body.contains("server-only-secret"), response.body)
                 when {
                     accept.startsWith("**") -> assertEquals("malformed Accept header", response.message())
-                    // The route already ran and, for POST, already wrote; only the response is unacceptable (#13).
                     expectedStatus == 406 -> assertEquals("no acceptable response media type", response.message())
                 }
             }
-            if (accept.startsWith("**")) assertEquals(countBefore, repository.findAll().size)
+            if (rejectedBeforeRouting) assertEquals(countBefore, repository.findAll().size)
+        }
+    }
+
+    /**
+     * Selected negotiation semantics (RFC 9110 12.5.1), enforced before routing: absent or empty
+     * Accept means no preference; the most specific matching media range decides - an exact
+     * `application/json`, then a subtype wildcard, then the catch-all - and within one specificity the
+     * highest q wins; q=0 excludes; range parameters other than q are ignored. Every response this API
+     * can produce is application/json, so a request excluding it must not reach a route at all.
+     *
+     * Each case is the list of Accept field lines sent: repeated lines combine in received order
+     * (RFC 9110 5.2) and empty list elements are ignored (5.6.1). The parameter name `q` is
+     * case-insensitive (12.4.2). Anything outside the Accept grammar - a bare `*`, a wildcard type
+     * with a concrete subtype, a quoted qvalue, whitespace inside a media range - is a malformed
+     * header (400), not a preference the server guesses at; a quoted-string parameter other than `q`
+     * is grammatical and may contain `,` or `;`. Every answer varies on Accept and says so.
+     */
+    @Test
+    fun `an unacceptable Accept is rejected before the route runs`() = withRawServer { port ->
+        val unacceptable = listOf(
+            listOf("application/json;q=0"),
+            listOf("application/json;Q=0"),
+            listOf("*/*;q=0"),
+            listOf("*/*;Q=0"),
+            listOf("application/*;q=0"),
+            listOf("application/json;q=0, */*"),
+            listOf("application/json;Q=0, */*"),
+            listOf("text/plain"),
+            listOf("text/plain, text/html"),
+            listOf("text/plain, "),
+            listOf("text/html"),
+            listOf("text/*"),
+            listOf("application/xml"),
+            listOf("text/plain", "text/html"),
+            listOf("application/json;q=0", "*/*"),
+            listOf("text/plain", ""),
+            listOf("application/json;charset=\"a,b\";q=0"),
+            listOf("text/plain;note=\"a;q=1\""),
+            listOf("application/json ;; q=0"),
+        )
+        val acceptable = listOf(
+            null,
+            listOf(""),
+            listOf("application/json"),
+            listOf("Application/JSON"),
+            listOf("application/json; charset=utf-8"),
+            listOf("application/json;Q=0.5"),
+            listOf("*/*"),
+            listOf("application/*"),
+            listOf("text/plain, application/json"),
+            listOf("text/plain;q=0.9, application/json;q=0.1"),
+            listOf("text/plain;Q=0.9, application/json;Q=0.1"),
+            listOf("text/html, */*;q=0.5"),
+            listOf("application/json, */*;q=0"),
+            listOf("application/json, */*;Q=0"),
+            listOf("text/plain", "application/json"),
+            listOf("application/json", "text/plain"),
+            listOf("", "application/json"),
+            listOf("text/html", "*/*;q=0.5"),
+            listOf(","),
+            listOf("application/json ; q=0.5"),
+            listOf("application/json;q=0.5;ext=1"),
+            listOf("application/json;charset=\"utf-8\""),
+            listOf("application/json;"),
+            listOf("*/*;q=0.001"),
+        )
+        val malformed = listOf(
+            listOf("application/json;q=abc"),
+            listOf("application/json;q="),
+            listOf("application/json;q=2"),
+            listOf("application/json;q=-1"),
+            listOf("application/json;q=1.5"),
+            listOf("application/json;q=.5"),
+            listOf("application/json;q=0.1234"),
+            listOf("application/json;Q=abc"),
+            listOf("application/json", "text/plain;q=2"),
+            listOf("*"),
+            listOf("*;q=0.5"),
+            listOf("text/plain, *"),
+            listOf("application/json", "*"),
+            listOf("*/json"),
+            listOf("*/json;q=0"),
+            listOf("*/JSON"),
+            listOf("text/plain, */json"),
+            listOf("application/json", "*/json"),
+            listOf("application/json;q=\"0.5\""),
+            listOf("application/json;q=\"0\""),
+            listOf("application / json"),
+            listOf("application"),
+            listOf("/json"),
+            listOf("application/"),
+            listOf("application/json foo"),
+            listOf("application/json;charset"),
+            listOf("application/json;charset=\"open"),
+            listOf("application/json;q = 0"),
+        )
+        val repository = TransactionRepository(Database.open(dbFile))
+        for (accept in acceptable + unacceptable + malformed) {
+            val expectedError = when (accept) {
+                in unacceptable -> 406 to "no acceptable response media type"
+                in malformed -> 400 to "malformed Accept header"
+                else -> null
+            }
+            val headers = accept.orEmpty().map { "Accept: $it" }
+            for ((target, success, schema) in listOf(
+                Triple("GET /api/transactions", 200, "transaction-list-response.schema.json"),
+                Triple("POST /api/transactions", 201, "transaction.schema.json"),
+            )) {
+                val post = target.startsWith("POST")
+                val countBefore = repository.findAll().size
+                val response = rawRequest(
+                    port,
+                    target,
+                    if (post) headers + "Content-Type: application/json" else headers,
+                    if (post) validRequest else "",
+                )
+                val context = "Accept: $accept; $target; ${response.raw}"
+                assertEquals(expectedError?.first ?: success, response.status, context)
+                assertTrue(response.hasHeader("Content-Type: application/json"), context)
+                assertTrue(response.hasHeader("Vary: Accept"), context)
+                assertMatchesSchema(response.body, if (expectedError != null) "api-error.schema.json" else schema)
+                if (expectedError != null) {
+                    assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
+                    assertEquals(expectedError.second, response.message())
+                }
+                // The write is the side effect a rejected request must not leave behind.
+                assertEquals(countBefore + if (post && expectedError == null) 1 else 0, repository.findAll().size, context)
+            }
         }
     }
 
     @Test
     fun `framework generated statuses carry the shared error shape`() = withRawServer { port ->
-        // Routing and ContentNegotiation produce these without throwing, so they never reach an
-        // exception handler and used to answer with an empty body.
+        // Routing produces this without throwing, so it never reaches an exception handler and used to
+        // answer with an empty body. An unsatisfiable Accept no longer reaches the framework at all.
         for (method in listOf("PUT", "DELETE", "PATCH")) {
             val response = rawRequest(port, "$method /api/transactions")
             assertEquals(405, response.status, response.raw)
+            assertTrue(response.hasHeader("Vary: Accept"), response.raw)
             assertMatchesSchema(response.body, "api-error.schema.json")
             assertEquals("method not allowed", response.message())
         }
-        val unacceptable = rawRequest(port, "GET /api/transactions", listOf("Accept: text/html"))
-        assertEquals(406, unacceptable.status, unacceptable.raw)
-        assertMatchesSchema(unacceptable.body, "api-error.schema.json")
-        assertEquals("no acceptable response media type", unacceptable.message())
     }
 
     @Test

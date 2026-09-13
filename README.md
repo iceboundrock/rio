@@ -81,7 +81,8 @@ features/              one Markdown spec per interview feature
 | GET    | `/api/transactions/{id}`  | 200 `Transaction`                | 404 |
 | POST   | `/api/transactions`       | 201 `Transaction`                | 400, 415 |
 
-Any path also answers 405 for a method it does not route and 406 for an unsatisfiable `Accept`.
+Any path also answers 405 for a method it does not route and 406 for an unsatisfiable `Accept`,
+the latter before the route runs.
 
 ```json
 // Transaction
@@ -112,10 +113,38 @@ field belongs to a nested object (`amount.currency`); other malformed JSON or in
 return 400 with `malformed request body`. Validation error *responses* describe constraints without
 echoing request values; server logs are not redacted and still record the full request line.
 A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.
-Error responses are explicitly serialized as JSON regardless of `Accept`, including the statuses the
-framework raises on its own: an unroutable method returns 405 `method not allowed`, and a successful
-response that no acceptable media type can represent returns 406 `no acceptable response media type`
-*after* the route has run — for POST the transaction is written and the caller cannot see it (#13).
+Error responses are explicitly serialized as JSON regardless of `Accept`, including the status the
+framework raises on its own: an unroutable method returns 405 `method not allowed`.
+
+Every response this API produces — success or error — is `application/json`, so acceptability is
+decided from `Accept` alone, *before* any route runs: a request that excludes JSON returns 406
+`no acceptable response media type` and has no side effects (a rejected POST writes nothing).
+The selected semantics (RFC 9110 §12.5.1):
+
+- An absent or empty `Accept` expresses no preference and accepts anything.
+- Repeated `Accept` field lines are combined in received order (§5.2) and empty list elements are
+  ignored (§5.6.1): `Accept: text/plain` followed by `Accept: application/json` is
+  `text/plain, application/json`, in either order.
+- The most specific matching media range decides: exact `application/json`, then `application/*`,
+  then `*/*`. Within one specificity the highest `q` wins, so `application/json;q=0, */*` is rejected
+  while `application/json, */*;q=0` is accepted.
+- `q=0` excludes; any `q` above zero accepts, since there is nothing to choose between. The parameter
+  name is case-insensitive (`Q=0` excludes too).
+- The header is read against the RFC 9110 grammar, not a lenient approximation of it: a bare `*`
+  or a wildcard type with a concrete subtype (`*/json`) — neither is a media range; §12.5.1 permits
+  `*/*`, `type/*`, `type/subtype` — spaces inside a media range, a quoted qvalue (`q="0.5"`) or one
+  outside §12.4.2 (`q=abc`, `q=2`, `q=.5`) is a malformed `Accept` and returns 400 rather than a
+  guessed preference. Quoted-string parameters other than `q` are grammatical and may contain `,`
+  or `;`.
+- Range parameters other than `q` are parsed but deliberately not matched, a simplification of full
+  media-range parameter matching: `application/json;charset=utf-16` is treated as `application/json`,
+  because the produced type carries no parameter a range could select between.
+
+The 406 body is itself the JSON `ApiError` shape even though the caller said it would not accept JSON;
+there is no empty error response anywhere in the API. Because every outcome depends on `Accept`,
+every response carries `Vary: Accept` (§12.5.5), so a shared cache cannot reuse a stored JSON body
+for a request the server would reject.
+
 Unsupported media types return 415 without WARN logs; failure to transform a type explicitly accepted
 by the route returns 500 `INTERNAL_ERROR` and logs a server warning.
 Media-type matching is case-insensitive and accepts parameters such as `charset=utf-8`;
