@@ -30,11 +30,6 @@ class SchemaInitializerTest {
         listOf("table", "card_transactions"),
     ) { it.getString("sql") }
 
-    private fun tableCount(name: String): Int = jdbc.queryForObject(
-        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = ? AND name = ?",
-        listOf("table", name),
-    ) { it.getInt("n") }
-
     @Test
     fun `fresh schema can be reopened without losing card transactions`() {
         SchemaInitializer.initialize(jdbc)
@@ -73,25 +68,6 @@ class SchemaInitializerTest {
         assertTrue(error.message!!.contains("RIO_DB_PATH"))
         assertTrue(error.message!!.contains("restart"))
         assertEquals(1, jdbc.queryForObject("SELECT id FROM card_transactions") { it.getInt("id") })
-    }
-
-    @Test
-    fun `legacy transactions table fails at startup with reset instructions and is left intact`() {
-        // Model a database created before the table rename to card_transactions.
-        jdbc.execute("CREATE TABLE transactions (id TEXT PRIMARY KEY, description TEXT NOT NULL)")
-        jdbc.update("INSERT INTO transactions (id, description) VALUES (?, ?)", listOf("legacy-0001", "Legacy row"))
-
-        val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }
-
-        assertTrue(error.message!!.contains("transactions"))
-        assertTrue(error.message!!.contains("backend/data/rio.db"))
-        assertTrue(error.message!!.contains("RIO_DB_PATH"))
-        assertTrue(error.message!!.contains("restart"))
-        assertEquals(0, tableCount("card_transactions"))
-        assertEquals(
-            "Legacy row",
-            jdbc.queryForObject("SELECT description FROM transactions WHERE id = ?", listOf("legacy-0001")) { it.getString("description") },
-        )
     }
 
     @Test

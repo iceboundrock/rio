@@ -23,27 +23,16 @@ object SchemaInitializer {
         )
     """.trimIndent()
 
-    private const val RESET_INSTRUCTIONS =
-        "Stop the backend and delete backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
-            "This resets local card transactions to demo data; back up data you need first."
-
     fun initialize(jdbc: JdbcTemplate) {
-        // The table was renamed from `transactions`. The DDL guard below only sees `card_transactions`,
-        // so a pre-rename database would otherwise start cleanly, get seeded, and hide the old rows.
-        val legacy = jdbc.queryOne(
-            "SELECT name FROM sqlite_master WHERE type = ? AND name = ?",
-            listOf("table", "transactions"),
-        ) { it.getString("name") }
-        check(legacy == null) {
-            "Found legacy transactions table; it was renamed to card_transactions. $RESET_INSTRUCTIONS"
-        }
         jdbc.update(CREATE_CARD_TRANSACTIONS)
         val actual = jdbc.queryOne(
             "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
             listOf("table", "card_transactions"),
         ) { it.getString("sql") }
         check(actual != null && canonicalDdl(actual) == canonicalDdl(CREATE_CARD_TRANSACTIONS)) {
-            "Stored card_transactions schema does not match the current definition. $RESET_INSTRUCTIONS"
+            "Stored card_transactions schema does not match the current definition. Stop the backend and delete " +
+                "backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
+                "This resets local card transactions to demo data; back up data you need first."
         }
     }
 
