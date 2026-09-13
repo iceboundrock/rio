@@ -1,5 +1,6 @@
 package ai.project.rio.cardtransaction
 
+import ai.project.rio.http.atItemIndex
 import ai.project.rio.http.receiveJson
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.respond
@@ -31,11 +32,13 @@ fun Route.cardTransactionRoutes(service: CardTransactionService) {
         post {
             when (val body = call.receiveJson<CreateCardTransactionsBody>()) {
                 is CreateCardTransactionsBody.One -> {
-                    val created = service.createAll(listOf(body.request.toNewCardTransaction())).single()
+                    val created = service.create(body.request.toNewCardTransaction())
                     call.respond(HttpStatusCode.Created, created.toDto())
                 }
                 is CreateCardTransactionsBody.Many -> {
-                    val created = service.createAll(body.requests.map { it.toNewCardTransaction() })
+                    // Wire-to-domain failures name the item, as the service's own rules do.
+                    val items = body.requests.mapIndexed { index, request -> atItemIndex(index) { request.toNewCardTransaction() } }
+                    val created = service.createAll(items)
                     call.respond(HttpStatusCode.Created, CardTransactionListResponse(created.map { it.toDto() }))
                 }
             }

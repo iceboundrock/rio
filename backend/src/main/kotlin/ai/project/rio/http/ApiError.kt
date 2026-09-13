@@ -12,6 +12,18 @@ data class ApiError(val code: String, val message: String) {
 /** Invalid request or domain rule violation -> HTTP 400. */
 class ValidationException(message: String) : RuntimeException(message)
 
+/**
+ * Runs [block] for item [index] of an array request body, so a ValidationException it throws names
+ * the item: `[1]: amount must be positive`. The single-object paths do not use this and keep the
+ * bare message.
+ */
+inline fun <T> atItemIndex(index: Int, block: () -> T): T =
+    try {
+        block()
+    } catch (e: ValidationException) {
+        throw ValidationException("[$index]: ${e.message}")
+    }
+
 /** No representation the request accepts can carry the response -> HTTP 406. */
 class NotAcceptableException(message: String) : RuntimeException(message)
 

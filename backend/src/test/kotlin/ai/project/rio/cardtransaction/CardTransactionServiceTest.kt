@@ -112,4 +112,30 @@ class CardTransactionServiceTest {
         }
         assertEquals(emptyList(), repository.findAll())
     }
+
+    @Test
+    fun `createAll reports the index of the invalid item`() {
+        val blank = assertFailsWith<ValidationException> {
+            service.createAll(listOf(lunch, salary.copy(description = "   ")))
+        }
+        assertEquals("[1]: description must not be blank", blank.message)
+
+        val zero = assertFailsWith<ValidationException> {
+            service.createAll(listOf(lunch.copy(amount = Money(0, Currency.USD)), salary))
+        }
+        assertEquals("[0]: amount must be positive", zero.message)
+    }
+
+    @Test
+    fun `create reports no item index`() {
+        val blank = assertFailsWith<ValidationException> {
+            service.create("   ", Money(1800, Currency.USD), CardTransactionType.DEBIT)
+        }
+        assertEquals("description must not be blank", blank.message)
+
+        val zero = assertFailsWith<ValidationException> {
+            service.create(NewCardTransaction("Lunch", Money(0, Currency.USD), CardTransactionType.DEBIT))
+        }
+        assertEquals("amount must be positive", zero.message)
+    }
 }
