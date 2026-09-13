@@ -2,6 +2,13 @@
 
 This repository is optimized for short AI-assisted coding exercises. Read this whole file; it is short.
 
+## Purpose
+
+This project exists to learn and practise AI coding. It is not a product and has no external users.
+Unless a task explicitly says otherwise, do not preserve compatibility across code changes: renaming
+an API path, a table, a schema, or a type is fine without shims, migrations, legacy-detection code, or
+deprecation periods. Document breaking changes in the PR description and move on.
+
 ## General
 
 - Inspect existing patterns before editing. Copy the neighbouring style.
@@ -20,7 +27,7 @@ This repository is optimized for short AI-assisted coding exercises. Read this w
 - HTTP translation belongs in routes and `http/ErrorHandling.kt`. Throw `ValidationException` (400) or `NotFoundException` (404).
 - Do not create generic repository hierarchies or interfaces with a single implementation.
 - Multi-statement writes go inside `jdbc.withTransaction { tx -> ... }` and use `tx` for every statement.
-- Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and delete `backend/data/rio.db`.
+- Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and delete `backend/data/rio.db`. Do not add code to detect or migrate old databases.
 
 ## Money
 

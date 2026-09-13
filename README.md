@@ -4,6 +4,10 @@ A deliberately small full-stack app: **Kotlin + Ktor + plain JDBC + SQLite** on 
 **React + TypeScript + Vite** on the front, and **shared JSON Schema** contracts in between.
 It exists to be understood in five minutes and extended in twenty. Read `AGENTS.md` before changing anything.
 
+This is a learning project for practising AI-assisted coding, not a product. Unless a task says
+otherwise, code changes do not need to stay compatible with earlier versions: paths, tables,
+schemas, and types may be renamed freely, and an existing local database is simply deleted.
+
 ## Quick start
 
 Prerequisites: JDK 25 (the Gradle toolchain pins 25), Node `^20.19.0 || >=22.12.0` (with npm). No Docker, no external database.
