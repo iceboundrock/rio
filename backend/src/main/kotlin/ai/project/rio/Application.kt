@@ -5,7 +5,6 @@ import ai.project.rio.db.JdbcTemplate
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.http.acceptRanges
 import ai.project.rio.http.configureErrorHandling
-import ai.project.rio.cardtransaction.CardTransactionRepository
 import ai.project.rio.cardtransaction.CardTransactionService
 import ai.project.rio.cardtransaction.cardTransactionRoutes
 import io.ktor.serialization.kotlinx.json.json
@@ -48,7 +47,7 @@ fun Application.module(jdbc: JdbcTemplate) {
     install(CallLogging)
     configureErrorHandling()
 
-    val cardTransactionService = CardTransactionService(CardTransactionRepository(jdbc))
+    val cardTransactionService = CardTransactionService(jdbc)
 
     routing {
         cardTransactionRoutes(cardTransactionService)

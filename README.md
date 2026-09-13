@@ -63,18 +63,18 @@ repositories and paid plans); once available, set it under
 contracts/schemas/     JSON Schema (Draft 2020-12). The single source of truth for HTTP shapes.
 backend/src/main/kotlin/ai/project/rio/
   Application.kt       wiring + main()
-  db/                  Database (SQLite connection setup), JdbcTemplate, SchemaInitializer (DDL + seed)
+  db/                  Database (SQLite connection setup), JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
   cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire)
   http/                ApiError, ErrorHandling (exception -> status mapping)
-backend/src/test/...   MoneyTest, JdbcTemplateTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
+backend/src/test/...   MoneyTest, JdbcTemplateTest, TransactionalServiceTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
                        contract/JsonSchemaAssertions (loads ../contracts/schemas)
 frontend/src/
   api/                 client.ts (fetch + validate), schemas.ts (Ajv validators), cardTransactions.ts (endpoints)
   money/               money.ts (bigint Money, formatting), money.test.ts
   types/               cardTransaction.ts (domain types)
   pages/               CardTransactionListPage, CardTransactionDetailsPage
-  components/          CardTransactionList, CardTransactionRow
+  components/          CardTransactionList, CardTransactionRow, CreateCardTransactionsForm (one or more rows, all-or-nothing)
 features/              one Markdown spec per interview feature
 ```
 
@@ -84,7 +84,7 @@ features/              one Markdown spec per interview feature
 |--------|-------------------------------|--------------------------------------|----------|
 | GET    | `/api/card-transactions`      | 200 `{ "items": [CardTransaction] }` | —        |
 | GET    | `/api/card-transactions/{id}` | 200 `CardTransaction`                | 404      |
-| POST   | `/api/card-transactions`      | 201 `CardTransaction`                | 400, 415 |
+| POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body | 400, 415 |
 
 Any path also answers 405 for a method it does not route and 406 for an unsatisfiable `Accept`,
 the latter before the route runs.
@@ -100,8 +100,14 @@ the latter before the route runs.
   "createdAt": "2026-09-02T15:30:00Z"
 }
 
-// POST body
+// POST body: one card transaction
 { "description": "Lunch", "amount": { "amount": "1800", "currency": "USD" }, "type": "DEBIT" }
+
+// POST body: several, created all-or-nothing (answers with the list shape)
+[
+  { "description": "Lunch", "amount": { "amount": "1800", "currency": "USD" }, "type": "DEBIT" },
+  { "description": "Ramen", "amount": { "amount": "1200", "currency": "JPY" }, "type": "CREDIT" }
+]
 
 // Any error
 { "code": "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR", "message": "amount must be positive" }
@@ -109,6 +115,11 @@ the latter before the route runs.
 
 `amount.amount` is a base-10 integer string in minor units (`"1800"` = USD 18.00, `"1800"` = JPY 1800).
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
+
+An array body must have at least one item and is inserted in one database transaction: if any item is
+invalid the request is 400 and nothing is persisted. Validation messages for array items carry the item
+index (`missing required fields: [1].amount.currency`). Any other JSON kind (`true`, `"x"`, `42`) is
+`malformed request body`.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
@@ -175,7 +186,8 @@ JSON Schema validation  api/schemas.ts        (Ajv, contracts/schemas/*.json)
   ↓  HTTP /api/...  (Vite proxies to :8080 in dev)
 Ktor Route              cardtransaction/CardTransactionRoutes.kt     (DTO <-> domain, status codes)
   ↓
-Service                 cardtransaction/CardTransactionService.kt    (business rules, ids, timestamps)
+Service                 cardtransaction/CardTransactionService.kt    (business rules, ids, timestamps;
+                        extends db/TransactionalService: multi-row writes run in one transaction)
   ↓
 Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction)
   ↓
@@ -230,6 +242,8 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | Hand-written DTOs and TS wire types | No code generation step; the schema tests catch drift. |
 | Shared JSON Schema, validated on both sides | One contract, executable in backend tests and at frontend runtime. |
 | Thin layers, no interfaces-with-one-impl, no DI | Small enough to hold in your head. |
+| `TransactionalService` base class for services that write more than one row | One place that knows how to start a transaction; services stay free of connection handling and repositories stay free of business rules. |
+| One `POST /api/card-transactions` accepting an object or an array | No second endpoint to keep in sync; the array form exercises the transactional path end to end. |
 
 ## JDBC: baseline and optional operations
 
@@ -238,22 +252,26 @@ Start with `query` (list), `queryOne` (row or null), and `update` (write/DDL).
 `JdbcTemplate` opens a connection per standalone operation. `JdbcExecutor` is also implemented
 by the transaction-scoped executor, which reuses one connection for the entire callback.
 
-Single-statement writes use the repository directly; SQLite already makes each statement atomic.
-`CardTransactionService` receives a `CardTransactionRepository`, which can also be bound to an outer
-transaction's executor. A future service owning multi-statement writes can receive `JdbcTemplate`
-and construct every participating repository from `tx`. For example:
+Services that own multi-statement writes extend `db/TransactionalService`, receive the `JdbcTemplate`,
+and run the write inside `transactional { tx -> ... }`, constructing every participating repository
+from `tx`. `CardTransactionService.createAll` is the reference implementation:
 
 ```kotlin
-jdbc.withTransaction { tx ->
-    val repository = CardTransactionRepository(tx)
-    repository.insert(firstCardTransaction)
-    repository.insert(secondCardTransaction)
+class TransferService(jdbc: JdbcTemplate) : TransactionalService(jdbc) {
+    fun transfer(debit: NewCardTransaction, credit: NewCardTransaction) = transactional { tx ->
+        val repository = CardTransactionRepository(tx)
+        repository.insert(validated(debit))
+        repository.insert(validated(credit))
+    }
 }
 ```
 
-Every repository participating in that write must be constructed with `tx`. A failure rolls
-back all statements; success commits them together. Keep SQL in repositories and validation
-in services. Nested transactions are outside the starter scope.
+A repository built from the template instead of `tx` would auto-commit on its own connection and escape
+the rollback, so the base class keeps its template private: inside a member function only `tx` resolves.
+A failure anywhere in the block rolls back all statements; success commits them together.
+Single-statement reads and writes use a repository built from the constructor parameter in a property
+initializer (see `CardTransactionService.repository`); SQLite already makes each statement atomic. Keep SQL in repositories and validation in services. Nested transactions are
+outside the starter scope.
 
 Optional operations are `queryForObject` (exactly one row), `extract` (consume a ResultSet),
 `batchUpdate` (atomic standalone batch or part of its surrounding transaction), and `execute`

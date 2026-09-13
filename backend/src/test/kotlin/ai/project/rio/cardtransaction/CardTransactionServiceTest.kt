@@ -37,7 +37,7 @@ class CardTransactionServiceTest {
         jdbc = Database.open(dbFile)
         SchemaInitializer.initialize(jdbc)
         repository = CardTransactionRepository(jdbc)
-        service = CardTransactionService(repository, Clock.fixed(fixedInstant, ZoneOffset.UTC))
+        service = CardTransactionService(jdbc, Clock.fixed(fixedInstant, ZoneOffset.UTC))
     }
 
     @AfterTest
@@ -86,5 +86,30 @@ class CardTransactionServiceTest {
     @Test
     fun `get throws NotFoundException for an unknown id`() {
         assertFailsWith<NotFoundException> { service.get("does-not-exist") }
+    }
+
+    private val lunch = NewCardTransaction("Lunch", Money(1800, Currency.USD), CardTransactionType.DEBIT)
+    private val salary = NewCardTransaction("  Salary  ", Money(500_000, Currency.JPY), CardTransactionType.CREDIT)
+
+    @Test
+    fun `createAll inserts every item in order and stamps the same instant`() {
+        val created = service.createAll(listOf(lunch, salary))
+
+        assertEquals(listOf("Lunch", "Salary"), created.map { it.description })
+        assertEquals(listOf(fixedInstant, fixedInstant), created.map { it.createdAt })
+        assertEquals(created.sortedByDescending { it.id }, repository.findAll())
+    }
+
+    @Test
+    fun `createAll rejects an empty list`() {
+        assertFailsWith<ValidationException> { service.createAll(emptyList()) }
+    }
+
+    @Test
+    fun `createAll rolls back every insert when a later item is invalid`() {
+        assertFailsWith<ValidationException> {
+            service.createAll(listOf(lunch, salary.copy(description = "   ")))
+        }
+        assertEquals(emptyList(), repository.findAll())
     }
 }

@@ -84,6 +84,27 @@ export function moneyToJson(money: Money): MoneyJson {
   return { amount: money.amount.toString(10), currency: money.currency };
 }
 
+// ---- user input ----
+
+const DECIMAL_TEXT = /^([0-9]+)(?:\.([0-9]+))?$/;
+
+/**
+ * Parses major-unit text typed by a user ("12.50" USD -> 1250n, "1250" JPY -> 1250n) with bigint
+ * only. Returns null when the text is not a plain unsigned decimal, has more fraction digits than the
+ * currency allows, or is zero. Used for magnitudes, so negatives are rejected too.
+ */
+export function moneyFromDecimalString(text: string, currency: CurrencyCode): Money | null {
+  const match = DECIMAL_TEXT.exec(text.trim());
+  if (!match) return null;
+  const { precision } = CURRENCIES[currency];
+  const major = match[1];
+  const fraction = match[2] ?? "";
+  if (fraction.length > precision) return null;
+  const amount = BigInt(major + fraction.padEnd(precision, "0"));
+  if (amount === 0n) return null;
+  return { amount, currency };
+}
+
 // ---- formatting (exact; no floating point anywhere) ----
 
 /** Money(1234n, USD) -> "12.34"; Money(5n, USD) -> "0.05"; Money(1234n, JPY) -> "1234"; Money(-1234n, USD) -> "-12.34" */

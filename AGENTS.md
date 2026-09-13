@@ -26,7 +26,7 @@ deprecation periods. Document breaking changes in the PR description and move on
 - Business rules belong in services (`cardtransaction/CardTransactionService.kt`).
 - HTTP translation belongs in routes and `http/ErrorHandling.kt`. Throw `ValidationException` (400) or `NotFoundException` (404).
 - Do not create generic repository hierarchies or interfaces with a single implementation.
-- Multi-statement writes go inside `jdbc.withTransaction { tx -> ... }` and use `tx` for every statement.
+- Services that write more than one row extend `db/TransactionalService`, take `JdbcTemplate`, and run the write inside `transactional { tx -> ... }`, constructing every participating repository from `tx`. Outside a service, multi-statement writes go inside `jdbc.withTransaction { tx -> ... }` and use `tx` for every statement.
 - Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and delete `backend/data/rio.db`. Do not add code to detect or migrate old databases.
 
 ## Money

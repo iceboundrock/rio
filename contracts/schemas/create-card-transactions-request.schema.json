@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rio.local/schemas/create-card-transactions-request.schema.json",
+  "title": "CreateCardTransactionsRequest",
+  "description": "Body of POST /api/card-transactions: one CreateCardTransactionRequest, or a non-empty array of them created all-or-nothing.",
+  "oneOf": [
+    { "$ref": "create-card-transaction-request.schema.json" },
+    {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "create-card-transaction-request.schema.json" }
+    }
+  ]
+}

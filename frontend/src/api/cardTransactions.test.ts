@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import moneySchema from "@schemas/money.schema.json";
 import { ApiContractError, ApiError } from "./client";
-import { createCardTransaction, getCardTransaction, getCardTransactions } from "./cardTransactions";
+import { createCardTransaction, createCardTransactions, getCardTransaction, getCardTransactions } from "./cardTransactions";
 import { CURRENCIES, formatMoney, type CurrencyCode } from "../money/money";
 
 const cardTransaction = {
@@ -50,6 +50,32 @@ describe("card transaction API boundary", () => {
     expect(JSON.parse(fetch.mock.calls[0][1].body).amount.amount).toBe("9223372036854775807");
     respond({ ...cardTransaction, amount: { amount: 125, currency: "USD" } }, 201);
     await expect(createCardTransaction({ description: "Test", amount: { amount: 125n, currency: "USD" }, type: "CREDIT" })).rejects.toBeInstanceOf(ApiContractError);
+  });
+
+  it("posts an array for a batch and maps every returned item", async () => {
+    const second = { ...cardTransaction, id: "tx-2", amount: { amount: "1200", currency: "JPY" }, type: "DEBIT" };
+    const fetch = respond({ items: [cardTransaction, second] }, 201);
+    const inputs = [
+      { description: "Test", amount: { amount: 9223372036854775807n, currency: "USD" as const }, type: "CREDIT" as const },
+      { description: "Ramen", amount: { amount: 1200n, currency: "JPY" as const }, type: "DEBIT" as const },
+    ];
+    const result = await createCardTransactions(inputs);
+    expect(result.map((r) => r.id)).toEqual(["tx-1", "tx-2"]);
+    expect(result[1].amount).toEqual({ amount: 1200n, currency: "JPY" });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe("/api/card-transactions");
+    expect(JSON.parse(init.body)).toEqual([
+      { description: "Test", amount: { amount: "9223372036854775807", currency: "USD" }, type: "CREDIT" },
+      { description: "Ramen", amount: { amount: "1200", currency: "JPY" }, type: "DEBIT" },
+    ]);
+  });
+
+  it("refuses to send an empty batch and rejects a batch response that violates the contract", async () => {
+    const fetch = respond({ items: [] }, 201);
+    await expect(createCardTransactions([])).rejects.toThrow(/violates the contract/);
+    expect(fetch).not.toHaveBeenCalled();
+    respond(cardTransaction, 201); // a bare object is not the list shape
+    await expect(createCardTransactions([{ description: "Test", amount: { amount: 1n, currency: "USD" }, type: "DEBIT" }])).rejects.toBeInstanceOf(ApiContractError);
   });
 
   it("rejects malformed list and detail shapes", async () => {

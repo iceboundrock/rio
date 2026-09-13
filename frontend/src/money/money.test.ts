@@ -6,6 +6,7 @@ import {
   compareMoney,
   formatMoney,
   formatSignedMoney,
+  moneyFromDecimalString,
   moneyFromJson,
   moneyToDecimalString,
   moneyToJson,
@@ -99,5 +100,28 @@ describe("formatMoney", () => {
     expect(formatSignedMoney(usd(500n), "DEBIT")).toBe("-$5.00");
     expect(formatSignedMoney(usd(500n), "CREDIT")).toBe("+$5.00");
     expect(formatSignedMoney(jpy(1500n), "CREDIT")).toBe("+¥1,500");
+  });
+});
+
+describe("moneyFromDecimalString", () => {
+  it("parses major-unit text by currency precision", () => {
+    expect(moneyFromDecimalString("12.50", "USD")).toEqual(usd(1250n));
+    expect(moneyFromDecimalString("12.5", "USD")).toEqual(usd(1250n));
+    expect(moneyFromDecimalString("12", "USD")).toEqual(usd(1200n));
+    expect(moneyFromDecimalString(" 0.05 ", "USD")).toEqual(usd(5n));
+    expect(moneyFromDecimalString("1250", "JPY")).toEqual(jpy(1250n));
+  });
+
+  it("stays exact beyond Number precision", () => {
+    expect(moneyFromDecimalString("123456789012345678901234567890.12", "EUR")).toEqual(eur(12345678901234567890123456789012n));
+  });
+
+  it("returns null for too many decimals, non-positive, and non-numeric text", () => {
+    for (const [text, currency] of [
+      ["12.501", "USD"], ["12.5", "JPY"], ["0", "USD"], ["0.00", "USD"], ["-1", "USD"], ["1e3", "USD"],
+      ["", "USD"], ["1 000", "USD"], ["$12", "USD"], [".5", "USD"], ["12.", "USD"], ["abc", "USD"],
+    ] as const) {
+      expect(moneyFromDecimalString(text, currency), `${text} ${currency}`).toBeNull();
+    }
   });
 });

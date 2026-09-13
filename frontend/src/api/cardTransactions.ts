@@ -3,6 +3,7 @@
 import { ApiContractError, getJson, postJson } from "./client";
 import {
   validateCreateCardTransactionRequest,
+  validateCreateCardTransactionsRequest,
   validateCardTransaction,
   validateCardTransactionListResponse,
   type CreateCardTransactionRequestJson,
@@ -40,15 +41,25 @@ export async function getCardTransaction(id: string): Promise<CardTransaction> {
   return fromJson(json, url);
 }
 
+function toJson(input: CreateCardTransactionInput): CreateCardTransactionRequestJson {
+  return { description: input.description, amount: moneyToJson(input.amount), type: input.type };
+}
+
 export async function createCardTransaction(input: CreateCardTransactionInput): Promise<CardTransaction> {
-  const body: CreateCardTransactionRequestJson = {
-    description: input.description,
-    amount: moneyToJson(input.amount),
-    type: input.type,
-  };
+  const body = toJson(input);
   if (!validateCreateCardTransactionRequest(body)) {
     throw new Error(`Refusing to send a request that violates the contract: ${JSON.stringify(body)}`);
   }
   const json = await postJson("/api/card-transactions", body, validateCardTransaction);
   return fromJson(json, "/api/card-transactions");
+}
+
+/** Creates every input or none: the server inserts an array body in one transaction. */
+export async function createCardTransactions(inputs: CreateCardTransactionInput[]): Promise<CardTransaction[]> {
+  const body = inputs.map(toJson);
+  if (!validateCreateCardTransactionsRequest(body)) {
+    throw new Error(`Refusing to send a request that violates the contract: ${JSON.stringify(body)}`);
+  }
+  const response = await postJson("/api/card-transactions", body, validateCardTransactionListResponse);
+  return response.items.map((item) => fromJson(item, "/api/card-transactions"));
 }

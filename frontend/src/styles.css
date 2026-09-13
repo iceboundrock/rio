@@ -150,3 +150,69 @@ table.card-transactions {
 .details dd {
   margin: 0;
 }
+
+.create-form {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.create-form h2 {
+  font-size: 1.1rem;
+  margin: 0 0 4px;
+}
+
+.create-form .muted {
+  margin: 0 0 12px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto auto auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.form-row input,
+.form-row select,
+.form-actions button,
+.form-row button {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.form-row .field-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #b91c1c;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.form-actions button[type="submit"] {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.form-actions button:disabled,
+.form-row button:disabled {
+  opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+  .form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}

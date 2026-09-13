@@ -102,21 +102,6 @@ class CardTransactionRepositoryTest {
     }
 
     @Test
-    fun `service joins a caller transaction and rolls back with other repository writes`() {
-        assertFailsWith<SQLException> {
-            jdbc.withTransaction { tx ->
-                val scopedRepository = CardTransactionRepository(tx)
-                val service = CardTransactionService(scopedRepository)
-                val created = service.create("Lunch", lunch.amount, lunch.type)
-                assertEquals(created, service.get(created.id))
-                scopedRepository.insert(lunch)
-                scopedRepository.insert(lunch) // Roll back the service write as well.
-            }
-        }
-        assertEquals(emptyList(), repository.findAll())
-    }
-
-    @Test
     fun `repositories sharing an executor roll back together`() {
         assertFailsWith<SQLException> {
             jdbc.withTransaction { tx ->
