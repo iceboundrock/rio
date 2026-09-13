@@ -25,6 +25,7 @@ function fromJson(json: TransactionJson, url: string): Transaction {
     type: json.type,
     status: json.status,
     createdAt,
+    createdAtInstant: json.createdAt,
   };
 }
 

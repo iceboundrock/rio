@@ -49,7 +49,7 @@ export default function TransactionDetailsPage() {
   );
 }
 
-function Details({ transaction }: { transaction: Transaction }) {
+export function Details({ transaction }: { transaction: Transaction }) {
   const { amount } = transaction;
   return (
     <article className="details">
@@ -74,7 +74,7 @@ function Details({ transaction }: { transaction: Transaction }) {
         </dd>
         <dt>Created</dt>
         <dd>
-          {transaction.createdAt.toLocaleString()} <span className="muted">({transaction.createdAt.toISOString()})</span>
+          {transaction.createdAt.toLocaleString()} <span className="muted">({transaction.createdAtInstant})</span>
         </dd>
       </dl>
     </article>

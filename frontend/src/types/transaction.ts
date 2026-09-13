@@ -14,6 +14,8 @@ export interface Transaction {
   type: TransactionType;
   status: TransactionStatus;
   createdAt: Date;
+  /** The validated API instant, verbatim (e.g. `2026-09-02T15:30:00.123456789Z`). Date truncates to milliseconds; use this for exact display and log correlation. */
+  createdAtInstant: string;
 }
 
 export interface CreateTransactionInput {
