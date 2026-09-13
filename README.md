@@ -10,7 +10,7 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `^20.19.0 || >=22.12.0` (with npm). No Docker, no external database.
+Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `^22.12.0 || ^24.0.0 || >=26.0.0` (with npm; the intersection of what Vite and Vitest support). No Docker, no external database.
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both
@@ -45,10 +45,13 @@ cd frontend && npm run build          # typecheck + production build
 `.github/workflows/verify.yml` runs `./verify.sh` on every pull request and on pushes to
 `main`. CI runs the same script you run locally — there is no separate CI-only test sequence.
 It runs the script once per JDK (Temurin 25, 21 and 17, overriding the toolchain pin through
-the `jdkVersion` Gradle property) on a single Node version (24.x) — Node only drives the
-frontend toolchain, the React app never runs on it. No external services and no secrets:
-backend tests create temporary SQLite files. When a run fails, the backend HTML and XML test
-reports are uploaded as a `backend-test-reports-jdk-<version>` artifact.
+the `jdkVersion` Gradle property) on a single Node version — Node only drives the frontend
+toolchain, the React app never runs on it. That version is exactly 22.12.0, the floor of the
+`engines.node` range in `frontend/package.json`, so a newer-than-floor Node API sneaking into
+the build or test setup fails in CI; local development on a newer Node covers the other end.
+No external services and no secrets: backend tests create temporary SQLite files. When a run
+fails, the backend HTML and XML test reports are uploaded as a
+`backend-test-reports-jdk-<version>` artifact.
 
 The matrix jobs report as `verify (jdk 25)` and friends; a single aggregate job named
 **`verify`** passes only when all of them do. Require `verify` — and only `verify` — in branch
