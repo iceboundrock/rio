@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { createCardTransactions } from "../api/cardTransactions";
 import { describeError } from "../api/errors";
-import { CURRENCIES, moneyFromDecimalString, type CurrencyCode } from "../money/money";
+import { CURRENCIES, MAX_WIRE_AMOUNT, moneyFromDecimalString, type CurrencyCode } from "../money/money";
 import type { CardTransactionType, CreateCardTransactionInput } from "../types/cardTransaction";
 
 /** One row of the form, as typed. Amount stays text until submit; it is parsed with bigint only. */
@@ -31,6 +31,7 @@ export function validateRows(rows: FormRow[]): { inputs: CreateCardTransactionIn
         ? `Enter a positive whole amount for ${row.currency}.`
         : `Enter a positive amount with at most ${precision} decimals for ${row.currency}.`;
     }
+    if (amount.amount > MAX_WIRE_AMOUNT) return "Amount is too large.";
     inputs.push({ description: row.description.trim(), amount, type: row.type });
     return null;
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CURRENCIES,
   CurrencyMismatchError,
+  MAX_WIRE_AMOUNT,
   addMoney,
   compareMoney,
   formatMoney,
@@ -100,6 +101,13 @@ describe("formatMoney", () => {
     expect(formatSignedMoney(usd(500n), "DEBIT")).toBe("-$5.00");
     expect(formatSignedMoney(usd(500n), "CREDIT")).toBe("+$5.00");
     expect(formatSignedMoney(jpy(1500n), "CREDIT")).toBe("+¥1,500");
+  });
+});
+
+describe("MAX_WIRE_AMOUNT", () => {
+  it("is the signed 64-bit maximum the backend stores", () => {
+    expect(MAX_WIRE_AMOUNT).toBe(2n ** 63n - 1n);
+    expect(MAX_WIRE_AMOUNT.toString(10)).toBe("9223372036854775807");
   });
 });
 

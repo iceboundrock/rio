@@ -1,7 +1,8 @@
 // Card transaction endpoints. Pages call these and receive domain objects (bigint Money, Date timestamps plus the verbatim createdAt instant).
 
-import { ApiContractError, getJson, postJson } from "./client";
+import { ApiContractError, RequestContractError, getJson, postJson } from "./client";
 import {
+  describeErrors,
   validateCreateCardTransactionRequest,
   validateCreateCardTransactionsRequest,
   validateCardTransaction,
@@ -48,7 +49,7 @@ function toJson(input: CreateCardTransactionInput): CreateCardTransactionRequest
 export async function createCardTransaction(input: CreateCardTransactionInput): Promise<CardTransaction> {
   const body = toJson(input);
   if (!validateCreateCardTransactionRequest(body)) {
-    throw new Error(`Refusing to send a request that violates the contract: ${JSON.stringify(body)}`);
+    throw new RequestContractError("/api/card-transactions", describeErrors(validateCreateCardTransactionRequest));
   }
   const json = await postJson("/api/card-transactions", body, validateCardTransaction);
   return fromJson(json, "/api/card-transactions");
@@ -58,7 +59,7 @@ export async function createCardTransaction(input: CreateCardTransactionInput): 
 export async function createCardTransactions(inputs: CreateCardTransactionInput[]): Promise<CardTransaction[]> {
   const body = inputs.map(toJson);
   if (!validateCreateCardTransactionsRequest(body)) {
-    throw new Error(`Refusing to send a request that violates the contract: ${JSON.stringify(body)}`);
+    throw new RequestContractError("/api/card-transactions", describeErrors(validateCreateCardTransactionsRequest));
   }
   const response = await postJson("/api/card-transactions", body, validateCardTransactionListResponse);
   return response.items.map((item) => fromJson(item, "/api/card-transactions"));

@@ -57,6 +57,21 @@ describe("validateRows", () => {
     expect(rowErrors[2]).toBeNull();
   });
 
+  it("accepts amounts up to the signed 64-bit wire limit and rejects anything above it per row", () => {
+    const max = validateRows([{ ...lunch, amount: "92233720368547758.07" }, { ...ramen, amount: "9223372036854775807" }]);
+    expect(max.rowErrors).toEqual([null, null]);
+    expect(max.inputs?.map((i) => i.amount.amount)).toEqual([9223372036854775807n, 9223372036854775807n]);
+
+    const over = validateRows([
+      { ...lunch, amount: "92233720368547758.08" }, // one minor unit above Long.MAX_VALUE
+      { ...ramen, amount: "9999999999999999999" }, // 19 digits, above Long.MAX_VALUE
+      { ...lunch, amount: "100000000000000000000" }, // 20 digits
+      lunch,
+    ]);
+    expect(over.inputs).toBeNull();
+    expect(over.rowErrors).toEqual(["Amount is too large.", "Amount is too large.", "Amount is too large.", null]);
+  });
+
   it("starts with an empty USD debit row", () => {
     expect(emptyRow()).toEqual({ description: "", amount: "", currency: "USD", type: "DEBIT" });
   });

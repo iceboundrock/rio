@@ -26,6 +26,17 @@ export class ApiContractError extends Error {
   }
 }
 
+/** The request body failed the JSON Schema contract before being sent; nothing reached the server. */
+export class RequestContractError extends Error {
+  constructor(
+    readonly url: string,
+    detail: string,
+  ) {
+    super(`Request to ${url} violates the API contract: ${detail}`);
+    this.name = "RequestContractError";
+  }
+}
+
 export async function getJson<TWire>(url: string, validate: ValidateFunction<TWire>): Promise<TWire> {
   const response = await fetch(url, { headers: { Accept: "application/json" } });
   return handleResponse(url, response, validate);

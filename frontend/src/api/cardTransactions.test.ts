@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import moneySchema from "@schemas/money.schema.json";
-import { ApiContractError, ApiError } from "./client";
+import { ApiContractError, ApiError, RequestContractError } from "./client";
+import { describeError } from "./errors";
 import { createCardTransaction, createCardTransactions, getCardTransaction, getCardTransactions } from "./cardTransactions";
 import { CURRENCIES, formatMoney, type CurrencyCode } from "../money/money";
 
@@ -52,6 +53,20 @@ describe("card transaction API boundary", () => {
     await expect(createCardTransaction({ description: "Test", amount: { amount: 125n, currency: "USD" }, type: "CREDIT" })).rejects.toBeInstanceOf(ApiContractError);
   });
 
+  it("describes a request that violates the contract without dumping the request body", async () => {
+    const fetch = respond(cardTransaction, 201);
+    // 21 digits: over the schema's maxLength, so the guard fires before fetch.
+    const input = { description: "Rent", amount: { amount: 100000000000000000000n, currency: "USD" as const }, type: "DEBIT" as const };
+    for (const call of [() => createCardTransaction(input), () => createCardTransactions([input])]) {
+      const error = await call().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(RequestContractError);
+      expect(describeError(error)).toMatch(/^The request was not sent\. Request to \/api\/card-transactions violates the API contract: .*amount\/amount must NOT have more than 19 characters/);
+      expect(describeError(error)).not.toContain("Rent");
+      expect(describeError(error)).not.toContain("100000000000000000000");
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("posts an array for a batch and maps every returned item", async () => {
     const second = { ...cardTransaction, id: "tx-2", amount: { amount: "1200", currency: "JPY" }, type: "DEBIT" };
     const fetch = respond({ items: [cardTransaction, second] }, 201);
@@ -72,7 +87,7 @@ describe("card transaction API boundary", () => {
 
   it("refuses to send an empty batch and rejects a batch response that violates the contract", async () => {
     const fetch = respond({ items: [] }, 201);
-    await expect(createCardTransactions([])).rejects.toThrow(/violates the contract/);
+    await expect(createCardTransactions([])).rejects.toThrow(/violates the API contract/);
     expect(fetch).not.toHaveBeenCalled();
     respond(cardTransaction, 201); // a bare object is not the list shape
     await expect(createCardTransactions([{ description: "Test", amount: { amount: 1n, currency: "USD" }, type: "DEBIT" }])).rejects.toBeInstanceOf(ApiContractError);
