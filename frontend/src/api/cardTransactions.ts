@@ -1,4 +1,4 @@
-// Card cardTransaction endpoints. Pages call these and receive domain objects (bigint Money, Date timestamps plus the verbatim createdAt instant).
+// Card transaction endpoints. Pages call these and receive domain objects (bigint Money, Date timestamps plus the verbatim createdAt instant).
 
 import { ApiContractError, getJson, postJson } from "./client";
 import {
