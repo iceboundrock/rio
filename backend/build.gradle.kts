@@ -1,6 +1,5 @@
 plugins {
     kotlin("jvm") version "2.4.20"
-    kotlin("plugin.serialization") version "2.4.20"
     application
 }
 
@@ -17,10 +16,8 @@ dependencies {
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     // JSON for HTTP bodies (main) and JSON Schema validation of responses (tests).
     implementation("com.alibaba.fastjson2:fastjson2:2.0.65")
     implementation("org.xerial:sqlite-jdbc:3.53.4.0")
@@ -28,9 +25,6 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
-    testImplementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
-    // JSON Schema Draft 2020-12 validation of real HTTP responses (tests only).
-    testImplementation("com.networknt:json-schema-validator:3.0.7")
 }
 
 // Toolchain JDK. Local builds pin 25; CI overrides via ORG_GRADLE_PROJECT_jdkVersion to
