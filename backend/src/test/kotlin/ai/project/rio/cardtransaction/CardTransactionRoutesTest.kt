@@ -340,7 +340,7 @@ class CardTransactionRoutesTest {
         // No ContentNegotiation: receive() fails, and the handler for that failure must not re-parse
         // the header unguarded - a throw inside StatusPages escapes as a plain-text engine 500.
         configureErrorHandling()
-        routing { cardTransactionRoutes(CardTransactionService(CardTransactionRepository(Database.open(dbFile)))) }
+        routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
     }) { port ->
         val malformed = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: not a mime type"), validRequest)
         assertEquals(400, malformed.status, malformed.raw)
@@ -385,7 +385,7 @@ class CardTransactionRoutesTest {
     fun `missing ContentNegotiation is a server error with a JSON response`() = testApplication {
         application {
             configureErrorHandling()
-            routing { cardTransactionRoutes(CardTransactionService(CardTransactionRepository(Database.open(dbFile)))) }
+            routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
         }
         val response = postJson(validRequest)
         assertEquals(HttpStatusCode.InternalServerError, response.status)
@@ -404,10 +404,10 @@ class CardTransactionRoutesTest {
             install(ContentNegotiation) {
                 json()
                 // Valid JSON can no longer be converted to the request DTO; responses still serialize.
-                ignoreType<CreateCardTransactionRequest>()
+                ignoreType<CreateCardTransactionsBody>()
             }
             configureErrorHandling()
-            routing { cardTransactionRoutes(CardTransactionService(CardTransactionRepository(Database.open(dbFile)))) }
+            routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
         }
         try {
             val response = postJson(validRequest)
@@ -684,6 +684,82 @@ class CardTransactionRoutesTest {
             val text = response.bodyAsText()
             assertMatchesSchema(text, "api-error.schema.json")
             assertEquals("malformed request body", Json.parseToJsonElement(text).jsonObject["message"]!!.jsonPrimitive.content)
+        }
+    }
+
+    // ---- Array body: several card transactions created all-or-nothing ----
+
+    private val secondRequest = """{"description":"Ramen","amount":{"amount":"1200","currency":"JPY"},"type":"CREDIT"}"""
+
+    private suspend fun ApplicationTestBuilder.listIds(): List<String> =
+        (Json.parseToJsonElement(client.get("/api/card-transactions").bodyAsText()).jsonObject["items"] as kotlinx.serialization.json.JsonArray)
+            .map { it.jsonObject["id"]!!.jsonPrimitive.content }
+
+    private suspend fun ApplicationTestBuilder.assertBadRequestArray(body: String, expectedMessagePart: String) {
+        assertViolatesSchema(body, "create-card-transactions-request.schema.json")
+        val before = listIds()
+        val response = postJson(body)
+        assertEquals(HttpStatusCode.BadRequest, response.status, "body: $body -> ${response.bodyAsText()}")
+        val text = response.bodyAsText()
+        assertMatchesSchema(text, "api-error.schema.json")
+        val error = Json.parseToJsonElement(text).jsonObject
+        assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
+        val message = error["message"]!!.jsonPrimitive.content
+        assertTrue(message.contains(expectedMessagePart), "expected '$expectedMessagePart' in: $message")
+        assertEquals(before, listIds(), "a rejected array body must not persist anything")
+    }
+
+    @Test
+    fun `POST array creates every item and returns the list shape`() = withApp {
+        val request = "[$validRequest,$secondRequest]"
+        assertMatchesSchema(request, "create-card-transactions-request.schema.json")
+        assertMatchesSchema(validRequest, "create-card-transactions-request.schema.json")
+
+        val response = postJson(request)
+        assertEquals(HttpStatusCode.Created, response.status)
+        val body = response.bodyAsText()
+        assertMatchesSchema(body, "card-transaction-list-response.schema.json")
+
+        val items = Json.parseToJsonElement(body).jsonObject["items"] as kotlinx.serialization.json.JsonArray
+        assertEquals(listOf("Lunch", "Ramen"), items.map { it.jsonObject["description"]!!.jsonPrimitive.content })
+        assertEquals(listOf("USD", "JPY"), items.map { it.jsonObject["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content })
+        for (item in items) {
+            val fetched = client.get("/api/card-transactions/${item.jsonObject["id"]!!.jsonPrimitive.content}")
+            assertEquals(HttpStatusCode.OK, fetched.status)
+            assertEquals(item.toString(), fetched.bodyAsText())
+        }
+    }
+
+    @Test
+    fun `POST single object still returns a bare card transaction`() = withApp {
+        val body = postJson(validRequest).bodyAsText()
+        assertMatchesSchema(body, "card-transaction.schema.json")
+        assertViolatesSchema(body, "card-transaction-list-response.schema.json")
+    }
+
+    @Test
+    fun `POST array is all-or-nothing`() = withApp {
+        val blankSecond = secondRequest.replace("Ramen", "   ")
+        assertBadRequestArray("[$validRequest,$blankSecond]", "description must not be blank")
+        assertBadRequestArray("[$validRequest,${secondRequest.replace("1200", "0")}]", "amount must be positive")
+    }
+
+    @Test
+    fun `POST empty array is 400`() = withApp {
+        assertBadRequestArray("[]", "items must not be empty")
+    }
+
+    @Test
+    fun `POST array missing field reports the item index`() = withApp {
+        assertBadRequestArray("[$validRequest,${secondRequest.replace("\"currency\":\"JPY\"", "\"currency\":\"JPY\",\"x\":1")}]", "malformed request body")
+        assertBadRequestArray("[$validRequest,{\"description\":\"x\",\"amount\":{\"currency\":\"USD\"},\"type\":\"DEBIT\"}]", "missing required fields: [1].amount.amount")
+        assertBadRequestArray("[{\"amount\":{\"amount\":\"100\",\"currency\":\"USD\"}}]", "missing required fields: [0].description, [0].type")
+    }
+
+    @Test
+    fun `POST scalar body is 400`() = withApp {
+        for (body in listOf("true", "\"x\"", "42", "null")) {
+            assertBadRequestArray(body, "malformed request body")
         }
     }
 

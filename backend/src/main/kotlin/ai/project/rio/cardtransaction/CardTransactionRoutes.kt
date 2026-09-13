@@ -11,7 +11,7 @@ import io.ktor.server.routing.route
 /**
  * GET  /api/card-transactions
  * GET  /api/card-transactions/{id}
- * POST /api/card-transactions
+ * POST /api/card-transactions   one request object -> CardTransaction; array -> { items } (all-or-nothing)
  *
  * Routes only translate HTTP <-> DTO <-> service call. Errors are mapped in http/ErrorHandling.kt.
  */
@@ -29,13 +29,16 @@ fun Route.cardTransactionRoutes(service: CardTransactionService) {
         }
 
         post {
-            val request = call.receiveJson<CreateCardTransactionRequest>()
-            val created = service.create(
-                description = request.description,
-                amount = request.amount.toMoney(),
-                type = parseCardTransactionType(request.type),
-            )
-            call.respond(HttpStatusCode.Created, created.toDto())
+            when (val body = call.receiveJson<CreateCardTransactionsBody>()) {
+                is CreateCardTransactionsBody.One -> {
+                    val created = service.createAll(listOf(body.request.toNewCardTransaction())).single()
+                    call.respond(HttpStatusCode.Created, created.toDto())
+                }
+                is CreateCardTransactionsBody.Many -> {
+                    val created = service.createAll(body.requests.map { it.toNewCardTransaction() })
+                    call.respond(HttpStatusCode.Created, CardTransactionListResponse(created.map { it.toDto() }))
+                }
+            }
         }
     }
 }

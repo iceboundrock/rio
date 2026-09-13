@@ -6,6 +6,7 @@ import moneySchema from "@schemas/money.schema.json";
 import cardTransactionSchema from "@schemas/card-transaction.schema.json";
 import cardTransactionListResponseSchema from "@schemas/card-transaction-list-response.schema.json";
 import createCardTransactionRequestSchema from "@schemas/create-card-transaction-request.schema.json";
+import createCardTransactionsRequestSchema from "@schemas/create-card-transactions-request.schema.json";
 import apiErrorSchema from "@schemas/api-error.schema.json";
 import type { MoneyJson } from "../money/money";
 import type { CardTransactionStatus, CardTransactionType } from "../types/cardTransaction";
@@ -29,6 +30,9 @@ export interface CreateCardTransactionRequestJson {
   type: CardTransactionType;
 }
 
+/** POST body: one request, or a non-empty array created all-or-nothing. */
+export type CreateCardTransactionsRequestJson = CreateCardTransactionRequestJson | CreateCardTransactionRequestJson[];
+
 export interface ApiErrorJson {
   code: "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR";
   message: string;
@@ -42,6 +46,8 @@ export const validateMoney = ajv.compile<MoneyJson>(moneySchema);
 export const validateCardTransaction = ajv.compile<CardTransactionJson>(cardTransactionSchema);
 export const validateCardTransactionListResponse = ajv.compile<CardTransactionListResponseJson>(cardTransactionListResponseSchema);
 export const validateCreateCardTransactionRequest = ajv.compile<CreateCardTransactionRequestJson>(createCardTransactionRequestSchema);
+// $ref's the single-request schema by $id, which compile() above registered; keep this after it.
+export const validateCreateCardTransactionsRequest = ajv.compile<CreateCardTransactionsRequestJson>(createCardTransactionsRequestSchema);
 export const validateApiError = ajv.compile<ApiErrorJson>(apiErrorSchema);
 
 /** Human-readable summary of why a validator rejected a value. */

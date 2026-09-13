@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   validateApiError,
   validateCreateCardTransactionRequest,
+  validateCreateCardTransactionsRequest,
   validateMoney,
   validateCardTransaction,
   validateCardTransactionListResponse,
@@ -59,6 +60,24 @@ describe("card transaction schemas", () => {
     const { createdAt: _omitted, ...missingCreatedAt } = validCardTransaction;
     expect(validateCardTransaction(missingCreatedAt)).toBe(false);
     expect(validateCardTransactionListResponse({ items: [validCardTransaction], total: 1 })).toBe(false);
+  });
+});
+
+describe("create card transactions request schema", () => {
+  const request = { description: "Lunch", amount: { amount: "1800", currency: "USD" }, type: "DEBIT" };
+
+  it("accepts one request object or a non-empty array of them", () => {
+    expect(validateCreateCardTransactionsRequest(request)).toBe(true);
+    expect(validateCreateCardTransactionsRequest([request])).toBe(true);
+    expect(validateCreateCardTransactionsRequest([request, { ...request, type: "CREDIT" }])).toBe(true);
+  });
+
+  it("rejects an empty array, an invalid item, and scalars", () => {
+    expect(validateCreateCardTransactionsRequest([])).toBe(false);
+    expect(validateCreateCardTransactionsRequest([request, { ...request, amount: { amount: "0", currency: "USD" } }])).toBe(false);
+    expect(validateCreateCardTransactionsRequest([{ ...request, extra: 1 }])).toBe(false);
+    expect(validateCreateCardTransactionsRequest("x")).toBe(false);
+    expect(validateCreateCardTransactionsRequest(null)).toBe(false);
   });
 });
 

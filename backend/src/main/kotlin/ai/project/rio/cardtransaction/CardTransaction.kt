@@ -19,3 +19,10 @@ data class CardTransaction(
     val status: CardTransactionStatus,
     val createdAt: Instant,
 )
+
+/** What a caller supplies to create a card transaction; the service assigns id, status, and createdAt. */
+data class NewCardTransaction(
+    val description: String,
+    val amount: Money,
+    val type: CardTransactionType,
+)
