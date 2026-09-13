@@ -46,7 +46,7 @@ cd frontend && npm run build          # typecheck + production build
 `main`. CI runs the same script you run locally — there is no separate CI-only test sequence.
 It runs the script once per JDK (Temurin 25, 21 and 17, overriding the toolchain pin through
 the `jdkVersion` Gradle property) on a single Node version — Node only drives the frontend
-toolchain, the React app never runs on it. That version is 22.x, the floor of the
+toolchain, the React app never runs on it. That version is exactly 22.12.0, the floor of the
 `engines.node` range in `frontend/package.json`, so a newer-than-floor Node API sneaking into
 the build or test setup fails in CI; local development on a newer Node covers the other end.
 No external services and no secrets: backend tests create temporary SQLite files. When a run
