@@ -15,39 +15,44 @@ permissions:
 
 jobs:
   verify-matrix:
-    name: verify (node ${{ matrix.node }})
+    name: verify (jdk ${{ matrix.jdk }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Spans the range documented in frontend/package.json ("^20.19.0 || >=22.12.0").
-        node: ['22.x', '24.x', '26.x']
+        # Current release plus the LTS releases still in support. The backend is the only
+        # thing that runs on a JVM, so this is the only axis worth varying.
+        jdk: ['25', '21', '17']
     steps:
       - uses: actions/checkout@v5
 
-      # The Gradle toolchain pins JDK 25 (backend/build.gradle.kts), so it does not vary.
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: ${{ matrix.jdk }}
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # Node only runs the frontend toolchain (vitest, tsc, vite); the React app itself never
+      # executes on Node, so a single version is enough.
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ matrix.node }}
+          node-version: '24.x'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       # Backend tests (real Ktor pipeline, temporary SQLite files), frontend tests,
       # typecheck and production build. No external services and no secrets.
+      # ORG_GRADLE_PROJECT_jdkVersion overrides the toolchain pin in backend/build.gradle.kts.
       - run: ./verify.sh
+        env:
+          ORG_GRADLE_PROJECT_jdkVersion: ${{ matrix.jdk }}
 
       - name: Upload backend test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-reports-node-${{ matrix.node }}
+          name: backend-test-reports-jdk-${{ matrix.jdk }}
           path: |
             backend/build/reports/tests
             backend/build/test-results
@@ -55,7 +60,7 @@ jobs:
           retention-days: 7
 
   # Stable check name for branch protection: one required check that stays correct
-  # however the Node matrix above changes.
+  # however the JDK matrix above changes.
   verify:
     name: verify
     runs-on: ubuntu-latest
