@@ -21,6 +21,8 @@ dependencies {
     implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    // JSON for HTTP bodies (main) and JSON Schema validation of responses (tests).
+    implementation("com.alibaba.fastjson2:fastjson2:2.0.65")
     implementation("org.xerial:sqlite-jdbc:3.53.4.0")
     implementation("ch.qos.logback:logback-classic:1.6.3")
 

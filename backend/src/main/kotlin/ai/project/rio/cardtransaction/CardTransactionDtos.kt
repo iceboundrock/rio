@@ -3,25 +3,17 @@ package ai.project.rio.cardtransaction
 import ai.project.rio.http.ValidationException
 import ai.project.rio.money.Currency
 import ai.project.rio.money.Money
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.descriptors.buildClassSerialDescriptor
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonDecoder
-import kotlinx.serialization.json.JsonObject
+import com.alibaba.fastjson2.JSONException
+import com.alibaba.fastjson2.JSONReader
+import com.alibaba.fastjson2.annotation.JSONType
+import com.alibaba.fastjson2.reader.ObjectReader
+import java.lang.reflect.Type
 
 // HTTP representations. These mirror the files under contracts/schemas exactly.
 // Money travels as { "amount": "<integer string>", "currency": "USD" }.
 
-@Serializable
 data class MoneyDto(val amount: String, val currency: String)
 
-@Serializable
 data class CardTransactionDto(
     val id: String,
     val description: String,
@@ -31,10 +23,8 @@ data class CardTransactionDto(
     val createdAt: String,
 )
 
-@Serializable
 data class CardTransactionListResponse(val items: List<CardTransactionDto>)
 
-@Serializable
 data class CreateCardTransactionRequest(
     val description: String,
     val amount: MoneyDto,
@@ -46,38 +36,32 @@ data class CreateCardTransactionRequest(
  * object, answered with one CardTransaction, or a non-empty array of them, created all-or-nothing and
  * answered with the list shape.
  */
-@Serializable(with = CreateCardTransactionsBodySerializer::class)
+@JSONType(deserializer = CreateCardTransactionsBodyReader::class)
 sealed class CreateCardTransactionsBody {
     data class One(val request: CreateCardTransactionRequest) : CreateCardTransactionsBody()
     data class Many(val requests: List<CreateCardTransactionRequest>) : CreateCardTransactionsBody()
 }
 
 /**
- * Reads the body as a JSON tree to tell an object from an array, then decodes that tree from its
- * text again. The second pass is deliberate: only the streaming decoder annotates a missing field
- * with its JSON path, which ErrorHandling.kt turns into `[1].amount.currency`; decoding the tree
- * directly would report a bare `currency`. The body is therefore parsed twice, and duplicate keys
- * collapse to the last value in the first pass before the second pass sees them.
+ * Dispatches on the first token - `{` is one request, `[` is a list of them - and reads the body once.
+ * The nested reads share this reader's context, so unknown keys are still rejected inside the items.
+ * Anything else (a scalar, `null`, a null array element) is not a create request at all and fails
+ * here, which ErrorHandling.kt answers as 400 `malformed request body`.
  */
-object CreateCardTransactionsBodySerializer : KSerializer<CreateCardTransactionsBody> {
+class CreateCardTransactionsBodyReader : ObjectReader<CreateCardTransactionsBody> {
 
-    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("CreateCardTransactionsBody")
-
-    override fun deserialize(decoder: Decoder): CreateCardTransactionsBody {
-        val json = decoder as? JsonDecoder ?: throw SerializationException("CreateCardTransactionsBody is JSON only")
-        return when (val element = json.decodeJsonElement()) {
-            is JsonObject -> CreateCardTransactionsBody.One(
-                json.json.decodeFromString(CreateCardTransactionRequest.serializer(), element.toString()),
+    override fun readObject(jsonReader: JSONReader, fieldType: Type?, fieldName: Any?, features: Long): CreateCardTransactionsBody =
+        when {
+            jsonReader.isObject -> CreateCardTransactionsBody.One(jsonReader.read(CreateCardTransactionRequest::class.java))
+            jsonReader.isArray -> CreateCardTransactionsBody.Many(
+                // readArray yields a null element for `[null]`; a null request would only surface later
+                // as a NullPointerException inside the route, i.e. a 500 for a client mistake.
+                jsonReader.readArray(CreateCardTransactionRequest::class.java).map {
+                    it as? CreateCardTransactionRequest ?: throw JSONException("array items must be JSON objects")
+                },
             )
-            is JsonArray -> CreateCardTransactionsBody.Many(
-                json.json.decodeFromString(ListSerializer(CreateCardTransactionRequest.serializer()), element.toString()),
-            )
-            else -> throw SerializationException("request body must be a JSON object or array")
+            else -> throw JSONException("request body must be a JSON object or array")
         }
-    }
-
-    override fun serialize(encoder: Encoder, value: CreateCardTransactionsBody) =
-        throw SerializationException("CreateCardTransactionsBody is a request body and is never serialized")
 }
 
 // ---- domain -> wire ----

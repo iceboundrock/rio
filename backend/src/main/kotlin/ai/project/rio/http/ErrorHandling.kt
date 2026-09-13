@@ -1,5 +1,6 @@
 package ai.project.rio.http
 
+import com.alibaba.fastjson2.JSON
 import io.ktor.http.BadContentTypeFormatException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -18,9 +19,6 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.ApplicationRequest
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.MissingFieldException
-import kotlinx.serialization.json.Json
 
 /**
  * Central exception -> HTTP mapping.
@@ -39,7 +37,6 @@ import kotlinx.serialization.json.Json
  * at all is decided from the Accept header alone, before any route runs (see acceptsProducedType).
  * Because of that every response varies on Accept, and says so.
  */
-@OptIn(ExperimentalSerializationApi::class)
 fun Application.configureErrorHandling() {
     install(StatusPages) {
         exception<ValidationException> { call, e ->
@@ -52,15 +49,12 @@ fun Application.configureErrorHandling() {
             call.respondApiError(HttpStatusCode.NotFound, ApiError(ApiError.NOT_FOUND, e.message ?: "not found"))
         }
         exception<BadRequestException> { call, e ->
-            // ContentNegotiation wraps header parsing failures in BadRequestException.
-            // Parser diagnostics can contain request values, keys, or the entire input.
-            val causes = generateSequence<Throwable>(e) { it.cause }.toList()
-            val missing = causes.filterIsInstance<MissingFieldException>().firstOrNull()
-            val message = when {
-                causes.any { it is BadContentTypeFormatException } -> "malformed Content-Type header"
-                missing != null -> "missing required fields: ${missing.describeFields()}"
-                else -> "malformed request body"
-            }
+            // ContentNegotiation wraps header parsing failures and every converter failure in
+            // BadRequestException. Parser diagnostics can contain request values, keys, or the entire
+            // input - fastjson2 names the offending key in "Unknown Property <key>" and the failing
+            // constructor in "invoke constructor error" - so none of them is echoed.
+            val malformedHeader = generateSequence<Throwable>(e) { it.cause }.any { it is BadContentTypeFormatException }
+            val message = if (malformedHeader) "malformed Content-Type header" else "malformed request body"
             call.respondApiError(HttpStatusCode.BadRequest, ApiError(ApiError.VALIDATION_ERROR, message))
         }
         exception<UnsupportedMediaTypeException> { call, _ ->
@@ -198,22 +192,9 @@ private fun acceptsProducedType(ranges: List<ContentTypeWithQuality>): Boolean {
     return quality > 0.0
 }
 
-// Bare field names are ambiguous when a nested object reuses one: MoneyDto.amount and
-// CreateCardTransactionRequest.amount both report "amount". kotlinx appends the JSON path of the failing
-// object to the message, so qualify the names with it. A path is a schema fact, not a request value;
-// anything outside the schema-shaped character set is dropped rather than echoed.
-private val MISSING_FIELD_PATH = Regex("""missing at path: \$([A-Za-z0-9_.\[\]]*)$""")
-
-@OptIn(ExperimentalSerializationApi::class)
-private fun MissingFieldException.describeFields(): String {
-    val path = MISSING_FIELD_PATH.find(message.orEmpty())?.groupValues?.get(1).orEmpty().removePrefix(".")
-    val prefix = if (path.isEmpty()) "" else "$path."
-    return missingFields.joinToString { prefix + it }
-}
-
 private suspend fun ApplicationCall.respondApiError(status: HttpStatusCode, error: ApiError) {
     // OutgoingContent bypasses negotiation, including a failed or incompatible Accept header.
-    respond(TextContent(Json.encodeToString(error), ContentType.Application.Json, status))
+    respond(TextContent(JSON.toJSONString(error), ContentType.Application.Json, status))
 }
 
 private suspend fun ApplicationCall.respondUnsupportedContentType() {

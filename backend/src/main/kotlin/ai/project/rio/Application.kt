@@ -5,9 +5,9 @@ import ai.project.rio.db.JdbcTemplate
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.http.acceptRanges
 import ai.project.rio.http.configureErrorHandling
+import ai.project.rio.http.fastjson2
 import ai.project.rio.cardtransaction.CardTransactionService
 import ai.project.rio.cardtransaction.cardTransactionRoutes
-import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
@@ -16,7 +16,6 @@ import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import java.nio.file.Path
-import kotlinx.serialization.json.Json
 
 /**
  * Entry point. Wiring is done by hand right here; there is no DI container.
@@ -39,7 +38,7 @@ fun main() {
 /** Ktor module. Tests call this directly with a temporary database. */
 fun Application.module(jdbc: JdbcTemplate) {
     install(ContentNegotiation) {
-        json(Json { ignoreUnknownKeys = false })
+        fastjson2()
         // Negotiate the success response from the same reading of Accept that admitted the request
         // (see acceptRanges); the plugin's own reading would 406 a repeated Accept line after the write.
         accept { call, _ -> call.request.acceptRanges() }
