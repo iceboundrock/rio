@@ -31,8 +31,12 @@ dependencies {
     testImplementation("com.networknt:json-schema-validator:3.0.7")
 }
 
+// Toolchain JDK. Local builds pin 25; CI overrides via ORG_GRADLE_PROJECT_jdkVersion to
+// also cover the older LTS releases (21, 17).
+val jdkVersion = (findProperty("jdkVersion") as String?)?.toInt() ?: 25
+
 kotlin {
-    jvmToolchain(25)
+    jvmToolchain(jdkVersion)
 }
 
 // sqlite-jdbc loads a native library; JDK 24+ warns (and will eventually refuse) without this flag.

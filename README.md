@@ -44,14 +44,15 @@ cd frontend && npm run build          # typecheck + production build
 
 `.github/workflows/verify.yml` runs `./verify.sh` on every pull request and on pushes to
 `main`. CI runs the same script you run locally — there is no separate CI-only test sequence.
-It provisions Temurin JDK 25 and runs the script once per Node version in the supported range
-(22.x, 24.x, 26.x). No external services and no secrets: backend tests create temporary SQLite
-files. When a run fails, the backend HTML and XML test reports are uploaded as a
-`backend-test-reports-node-<version>` artifact.
+It runs the script once per JDK (Temurin 25, 21 and 17, overriding the toolchain pin through
+the `jdkVersion` Gradle property) on a single Node version — Node only drives the frontend
+toolchain, the React app never runs on it. No external services and no secrets: backend tests
+create temporary SQLite files. When a run fails, the backend HTML and XML test reports are
+uploaded as a `backend-test-reports-jdk-<version>` artifact.
 
-The matrix jobs report as `verify (node 22.x)` and friends; a single aggregate job named
+The matrix jobs report as `verify (jdk 25)` and friends; a single aggregate job named
 **`verify`** passes only when all of them do. Require `verify` — and only `verify` — in branch
-protection, so adding or dropping a Node version never changes the required check. That setting
+protection, so adding or dropping a JDK version never changes the required check. That setting
 is not configurable on this repository today (GitHub restricts branch protection to public
 repositories and paid plans); once available, set it under
 *Settings → Branches → Add rule → Require status checks to pass → `verify`*.
