@@ -1,32 +1,32 @@
 // Compiles the shared JSON Schemas (contracts/schemas) into runtime validators.
-// Wire types below describe the JSON exactly as it travels; src/api/transactions.ts maps them to domain types.
+// Wire types below describe the JSON exactly as it travels; src/api/cardTransactions.ts maps them to domain types.
 
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 import moneySchema from "@schemas/money.schema.json";
-import transactionSchema from "@schemas/transaction.schema.json";
-import transactionListResponseSchema from "@schemas/transaction-list-response.schema.json";
-import createTransactionRequestSchema from "@schemas/create-transaction-request.schema.json";
+import cardTransactionSchema from "@schemas/card-transaction.schema.json";
+import cardTransactionListResponseSchema from "@schemas/card-transaction-list-response.schema.json";
+import createCardTransactionRequestSchema from "@schemas/create-card-transaction-request.schema.json";
 import apiErrorSchema from "@schemas/api-error.schema.json";
 import type { MoneyJson } from "../money/money";
-import type { TransactionStatus, TransactionType } from "../types/transaction";
+import type { CardTransactionStatus, CardTransactionType } from "../types/cardTransaction";
 
-export interface TransactionJson {
+export interface CardTransactionJson {
   id: string;
   description: string;
   amount: MoneyJson;
-  type: TransactionType;
-  status: TransactionStatus;
+  type: CardTransactionType;
+  status: CardTransactionStatus;
   createdAt: string;
 }
 
-export interface TransactionListResponseJson {
-  items: TransactionJson[];
+export interface CardTransactionListResponseJson {
+  items: CardTransactionJson[];
 }
 
-export interface CreateTransactionRequestJson {
+export interface CreateCardTransactionRequestJson {
   description: string;
   amount: MoneyJson;
-  type: TransactionType;
+  type: CardTransactionType;
 }
 
 export interface ApiErrorJson {
@@ -39,9 +39,9 @@ const ajv = new Ajv2020({ allErrors: true, strict: true });
 ajv.addSchema(moneySchema);
 
 export const validateMoney = ajv.compile<MoneyJson>(moneySchema);
-export const validateTransaction = ajv.compile<TransactionJson>(transactionSchema);
-export const validateTransactionListResponse = ajv.compile<TransactionListResponseJson>(transactionListResponseSchema);
-export const validateCreateTransactionRequest = ajv.compile<CreateTransactionRequestJson>(createTransactionRequestSchema);
+export const validateCardTransaction = ajv.compile<CardTransactionJson>(cardTransactionSchema);
+export const validateCardTransactionListResponse = ajv.compile<CardTransactionListResponseJson>(cardTransactionListResponseSchema);
+export const validateCreateCardTransactionRequest = ajv.compile<CreateCardTransactionRequestJson>(createCardTransactionRequestSchema);
 export const validateApiError = ajv.compile<ApiErrorJson>(apiErrorSchema);
 
 /** Human-readable summary of why a validator rejected a value. */

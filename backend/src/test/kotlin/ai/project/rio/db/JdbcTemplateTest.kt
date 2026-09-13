@@ -77,7 +77,7 @@ class JdbcTemplateTest {
 
     @Test
     fun `transaction commits on success`() {
-        val result = jdbc.transaction { tx ->
+        val result = jdbc.withTransaction { tx ->
             tx.update("INSERT INTO items (id, name) VALUES (?, ?)", listOf(1, "a"))
             tx.update("INSERT INTO items (id, name) VALUES (?, ?)", listOf(2, "b"))
             tx.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") }
@@ -90,7 +90,7 @@ class JdbcTemplateTest {
     fun `transaction rolls back and rethrows on exception`() {
         insert(1, "before")
         val e = assertFailsWith<IllegalStateException> {
-            jdbc.transaction { tx ->
+            jdbc.withTransaction { tx ->
                 tx.update("INSERT INTO items (id, name) VALUES (?, ?)", listOf(2, "inside"))
                 // The write above is visible to later statements in the same transaction...
                 assertEquals(2, tx.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
@@ -105,7 +105,7 @@ class JdbcTemplateTest {
     @Test
     fun `constraint violation inside a transaction rolls back earlier statements`() {
         assertFailsWith<java.sql.SQLException> {
-            jdbc.transaction { tx ->
+            jdbc.withTransaction { tx ->
                 tx.update("INSERT INTO items (id, name) VALUES (?, ?)", listOf(1, "first"))
                 tx.update("INSERT INTO items (id, name) VALUES (?, ?)", listOf(1, "duplicate id"))
             }
@@ -128,7 +128,7 @@ class JdbcTemplateTest {
             java.sql.DriverManager.getConnection("jdbc:sqlite:${dbFile.toAbsolutePath()}")
         }
         counting.query("SELECT 1") { it.getInt(1) }
-        counting.transaction { tx -> tx.update("INSERT INTO items (id) VALUES (?)", listOf(5)); tx.update("INSERT INTO items (id) VALUES (?)", listOf(6)) }
+        counting.withTransaction { tx -> tx.update("INSERT INTO items (id) VALUES (?)", listOf(5)); tx.update("INSERT INTO items (id) VALUES (?)", listOf(6)) }
         assertEquals(2, opened, "one connection per call, one per transaction block")
         // If a connection leaked with an open write, SQLite would hold a lock and this would time out.
         assertEquals(2, jdbc.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
@@ -210,7 +210,7 @@ class JdbcTemplateTest {
     fun `batchUpdate inside a transaction rolls back with the block`() {
         insert(9, "before")
         assertFailsWith<IllegalStateException> {
-            jdbc.transaction { tx ->
+            jdbc.withTransaction { tx ->
                 tx.batchUpdate("INSERT INTO items (id, name) VALUES (?, ?)", listOf(listOf(1, "a"), listOf(2, "b")))
                 assertEquals(3, tx.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
                 error("boom")
@@ -222,7 +222,7 @@ class JdbcTemplateTest {
     @Test
     fun `execute runs parameterless DDL`() {
         jdbc.execute("CREATE TABLE extra (id INTEGER PRIMARY KEY)")
-        jdbc.transaction { tx -> tx.execute("CREATE INDEX extra_idx ON extra (id)") }
+        jdbc.withTransaction { tx -> tx.execute("CREATE INDEX extra_idx ON extra (id)") }
         assertEquals(0, jdbc.queryOne("SELECT count(*) AS n FROM extra") { it.getInt("n") })
     }
 
@@ -233,7 +233,7 @@ class JdbcTemplateTest {
             java.sql.DriverManager.getConnection("jdbc:sqlite:${dbFile.toAbsolutePath()}")
         }
         assertEquals(listOf("a", "b"), capped.query("SELECT name FROM items ORDER BY id") { it.getString("name") })
-        assertEquals(2, capped.transaction { tx -> tx.query("SELECT name FROM items") { it.getString("name") }.size })
+        assertEquals(2, capped.withTransaction { tx -> tx.query("SELECT name FROM items") { it.getString("name") }.size })
     }
 
     @Test

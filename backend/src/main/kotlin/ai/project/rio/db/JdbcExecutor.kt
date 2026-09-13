@@ -15,7 +15,7 @@ typealias ResultSetExtractor<T> = (ResultSet) -> T
  * parameters.
  *
  * Implemented by [JdbcTemplate] (one connection per call) and by the executor handed to a
- * [JdbcTemplate.transaction] block (one connection for the whole block).
+ * [JdbcTemplate.withTransaction] block (one connection for the whole block).
  */
 interface JdbcExecutor {
 

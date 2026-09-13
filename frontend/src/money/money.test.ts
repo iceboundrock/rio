@@ -95,7 +95,7 @@ describe("formatMoney", () => {
     expect(formatMoney(usd(1234567890123456789012n))).toBe("$12,345,678,901,234,567,890.12");
   });
 
-  it("signs by transaction direction", () => {
+  it("signs by card transaction direction", () => {
     expect(formatSignedMoney(usd(500n), "DEBIT")).toBe("-$5.00");
     expect(formatSignedMoney(usd(500n), "CREDIT")).toBe("+$5.00");
     expect(formatSignedMoney(jpy(1500n), "CREDIT")).toBe("+¥1,500");

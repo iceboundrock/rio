@@ -31,14 +31,14 @@ class IncorrectResultSizeException(val expectedSize: Int, val actualSize: Int, s
 /**
  * Minimal JDBC helper in the spirit of Spring's JdbcTemplate: opens a connection per call, binds
  * parameters, applies [StatementSettings], maps rows, and closes everything deterministically.
- * It knows nothing about the domain (no Money, no Transaction). SQLExceptions are not translated;
+ * It knows nothing about the domain (no Money, no CardTransaction). SQLExceptions are not translated;
  * they propagate as thrown by the driver.
  *
- * `transaction { tx -> ... }` runs the block against one connection with auto-commit off,
+ * `withTransaction { tx -> ... }` runs the block against one connection with auto-commit off,
  * commits on success and rolls back on any exception. Nested transactions are not supported.
  *
  * `batchUpdate` called directly on the template runs inside its own transaction so the batch is
- * atomic; inside a `transaction` block, `tx.batchUpdate` joins the surrounding transaction.
+ * atomic; inside a `withTransaction` block, `tx.batchUpdate` joins the surrounding transaction.
  */
 class JdbcTemplate(
     private val settings: StatementSettings = StatementSettings(),
@@ -61,12 +61,12 @@ class JdbcTemplate(
         withConnection { it.update(sql, params) }
 
     override fun batchUpdate(sql: String, batchParams: List<List<Any?>>): IntArray =
-        transaction { it.batchUpdate(sql, batchParams) }
+        withTransaction { it.batchUpdate(sql, batchParams) }
 
     override fun execute(sql: String) =
         withConnection { it.execute(sql) }
 
-    fun <T> transaction(block: (JdbcExecutor) -> T): T =
+    fun <T> withTransaction(block: (JdbcExecutor) -> T): T =
         openConnection().use { conn ->
             conn.autoCommit = false
             try {

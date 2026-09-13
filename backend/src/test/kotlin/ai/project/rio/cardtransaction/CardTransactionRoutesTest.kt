@@ -1,4 +1,4 @@
-package ai.project.rio.transaction
+package ai.project.rio.cardtransaction
 
 import ai.project.rio.contract.JsonSchemaAssertions.assertMatchesSchema
 import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
@@ -52,13 +52,13 @@ import kotlinx.serialization.json.jsonPrimitive
  * Exercises the real Ktor pipeline against a temporary SQLite file and validates every
  * response body against the shared JSON Schemas in contracts/schemas.
  */
-class TransactionRoutesTest {
+class CardTransactionRoutesTest {
 
     private lateinit var dbFile: Path
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("transaction-routes-test", ".db")
+        dbFile = Files.createTempFile("card-transaction-routes-test", ".db")
         val jdbc = Database.open(dbFile)
         SchemaInitializer.initialize(jdbc)
         SchemaInitializer.seedIfEmpty(jdbc)
@@ -75,7 +75,7 @@ class TransactionRoutesTest {
     }
 
     private suspend fun ApplicationTestBuilder.postJson(body: String): HttpResponse =
-        client.post("/api/transactions") {
+        client.post("/api/card-transactions") {
             contentType(ContentType.Application.Json)
             setBody(body)
         }
@@ -136,10 +136,10 @@ class TransactionRoutesTest {
         )
         for ((type, status, message) in cases) {
             val headers = listOfNotNull(type?.let { "Content-Type: $it" })
-            val response = rawRequest(port, "POST /api/transactions", headers, validRequest)
+            val response = rawRequest(port, "POST /api/card-transactions", headers, validRequest)
             assertEquals(status, response.status, "Content-Type: $type; ${response.raw}")
             assertTrue(response.hasHeader("Accept-Post: application/json"))
-            assertMatchesSchema(response.body, if (status == 201) "transaction.schema.json" else "api-error.schema.json")
+            assertMatchesSchema(response.body, if (status == 201) "card-transaction.schema.json" else "api-error.schema.json")
             if (message != null) {
                 assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
                 assertEquals(message, response.message())
@@ -153,15 +153,15 @@ class TransactionRoutesTest {
         routing { get("/test-failure") { error("server-only-secret") } }
     }) { port ->
         val cases = listOf(
-            Triple("GET /api/transactions", null, 200),
-            Triple("GET /api/transactions/nope", null, 404),
+            Triple("GET /api/card-transactions", null, 200),
+            Triple("GET /api/card-transactions/nope", null, 404),
             Triple("GET /api/no-route", null, 404),
-            Triple("POST /api/transactions", "text/plain", 415),
-            Triple("POST /api/transactions", "application/json", 400),
-            Triple("POST /api/transactions", "application/json", 201),
+            Triple("POST /api/card-transactions", "text/plain", 415),
+            Triple("POST /api/card-transactions", "application/json", 400),
+            Triple("POST /api/card-transactions", "application/json", 201),
             Triple("GET /test-failure", null, 500),
         )
-        val repository = TransactionRepository(Database.open(dbFile))
+        val repository = CardTransactionRepository(Database.open(dbFile))
         for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
             // Malformed and unacceptable Accept headers are both rejected before routing, so no target
             // reaches its handler: the status describes the header, not what the route would have done.
@@ -179,8 +179,8 @@ class TransactionRoutesTest {
                 assertEquals(expectedStatus, response.status, response.raw)
                 assertTrue(response.hasHeader("Content-Type: application/json"), response.raw)
                 val schema = when (expectedStatus) {
-                    200 -> "transaction-list-response.schema.json"
-                    201 -> "transaction.schema.json"
+                    200 -> "card-transaction-list-response.schema.json"
+                    201 -> "card-transaction.schema.json"
                     else -> "api-error.schema.json"
                 }
                 assertMatchesSchema(response.body, schema)
@@ -287,7 +287,7 @@ class TransactionRoutesTest {
             listOf("application/json;charset=\"open"),
             listOf("application/json;q = 0"),
         )
-        val repository = TransactionRepository(Database.open(dbFile))
+        val repository = CardTransactionRepository(Database.open(dbFile))
         for (accept in acceptable + unacceptable + malformed) {
             val expectedError = when (accept) {
                 in unacceptable -> 406 to "no acceptable response media type"
@@ -296,8 +296,8 @@ class TransactionRoutesTest {
             }
             val headers = accept.orEmpty().map { "Accept: $it" }
             for ((target, success, schema) in listOf(
-                Triple("GET /api/transactions", 200, "transaction-list-response.schema.json"),
-                Triple("POST /api/transactions", 201, "transaction.schema.json"),
+                Triple("GET /api/card-transactions", 200, "card-transaction-list-response.schema.json"),
+                Triple("POST /api/card-transactions", 201, "card-transaction.schema.json"),
             )) {
                 val post = target.startsWith("POST")
                 val countBefore = repository.findAll().size
@@ -327,7 +327,7 @@ class TransactionRoutesTest {
         // Routing produces this without throwing, so it never reaches an exception handler and used to
         // answer with an empty body. An unsatisfiable Accept no longer reaches the framework at all.
         for (method in listOf("PUT", "DELETE", "PATCH")) {
-            val response = rawRequest(port, "$method /api/transactions")
+            val response = rawRequest(port, "$method /api/card-transactions")
             assertEquals(405, response.status, response.raw)
             assertTrue(response.hasHeader("Vary: Accept"), response.raw)
             assertMatchesSchema(response.body, "api-error.schema.json")
@@ -340,9 +340,9 @@ class TransactionRoutesTest {
         // No ContentNegotiation: receive() fails, and the handler for that failure must not re-parse
         // the header unguarded - a throw inside StatusPages escapes as a plain-text engine 500.
         configureErrorHandling()
-        routing { transactionRoutes(TransactionService(TransactionRepository(Database.open(dbFile)))) }
+        routing { cardTransactionRoutes(CardTransactionService(CardTransactionRepository(Database.open(dbFile)))) }
     }) { port ->
-        val malformed = rawRequest(port, "POST /api/transactions", listOf("Content-Type: not a mime type"), validRequest)
+        val malformed = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: not a mime type"), validRequest)
         assertEquals(400, malformed.status, malformed.raw)
         assertTrue(malformed.hasHeader("Content-Type: application/json"), malformed.raw)
         assertMatchesSchema(malformed.body, "api-error.schema.json")
@@ -350,7 +350,7 @@ class TransactionRoutesTest {
         assertTrue(!malformed.body.contains("not a mime type"), malformed.body)
 
         // The genuine misconfiguration this handler exists for still reports a server fault.
-        val declared = rawRequest(port, "POST /api/transactions", listOf("Content-Type: application/json"), validRequest)
+        val declared = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: application/json"), validRequest)
         assertEquals(500, declared.status, declared.raw)
         assertMatchesSchema(declared.body, "api-error.schema.json")
     }
@@ -365,7 +365,7 @@ class TransactionRoutesTest {
         }
         try {
             for (type in listOf(null, ContentType.Text.Plain, ContentType.parse("application/vnd.api+json"))) {
-                val response = client.post("/api/transactions") {
+                val response = client.post("/api/card-transactions") {
                     setBody(object : OutgoingContent.ByteArrayContent() {
                         override val contentType: ContentType? = type
                         override fun bytes(): ByteArray = validRequest.toByteArray()
@@ -385,7 +385,7 @@ class TransactionRoutesTest {
     fun `missing ContentNegotiation is a server error with a JSON response`() = testApplication {
         application {
             configureErrorHandling()
-            routing { transactionRoutes(TransactionService(TransactionRepository(Database.open(dbFile)))) }
+            routing { cardTransactionRoutes(CardTransactionService(CardTransactionRepository(Database.open(dbFile)))) }
         }
         val response = postJson(validRequest)
         assertEquals(HttpStatusCode.InternalServerError, response.status)
@@ -404,10 +404,10 @@ class TransactionRoutesTest {
             install(ContentNegotiation) {
                 json()
                 // Valid JSON can no longer be converted to the request DTO; responses still serialize.
-                ignoreType<CreateTransactionRequest>()
+                ignoreType<CreateCardTransactionRequest>()
             }
             configureErrorHandling()
-            routing { transactionRoutes(TransactionService(TransactionRepository(Database.open(dbFile)))) }
+            routing { cardTransactionRoutes(CardTransactionService(CardTransactionRepository(Database.open(dbFile)))) }
         }
         try {
             val response = postJson(validRequest)
@@ -429,19 +429,19 @@ class TransactionRoutesTest {
     fun `every supported currency persists and satisfies the contract`() = withApp {
         for (currency in Currency.entries) {
             val request = """{"description":"Currency test","amount":{"amount":"9223372036854775807","currency":"${currency.code}"},"type":"CREDIT"}"""
-            assertMatchesSchema(request, "create-transaction-request.schema.json")
+            assertMatchesSchema(request, "create-card-transaction-request.schema.json")
             val response = postJson(request)
             assertEquals(HttpStatusCode.Created, response.status)
             val body = response.bodyAsText()
-            assertMatchesSchema(body, "transaction.schema.json")
+            assertMatchesSchema(body, "card-transaction.schema.json")
             val json = Json.parseToJsonElement(body).jsonObject
             assertEquals(currency.code, json["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content)
             assertEquals("9223372036854775807", json["amount"]!!.jsonObject["amount"]!!.jsonPrimitive.content)
-            val fetched = client.get("/api/transactions/${json["id"]!!.jsonPrimitive.content}")
+            val fetched = client.get("/api/card-transactions/${json["id"]!!.jsonPrimitive.content}")
             assertEquals(HttpStatusCode.OK, fetched.status)
             assertEquals(body, fetched.bodyAsText())
         }
-        assertMatchesSchema(client.get("/api/transactions").bodyAsText(), "transaction-list-response.schema.json")
+        assertMatchesSchema(client.get("/api/card-transactions").bodyAsText(), "card-transaction-list-response.schema.json")
     }
 
     @Test
@@ -453,7 +453,7 @@ class TransactionRoutesTest {
             })
         }
         for (type in listOf(null, ContentType.Application.OctetStream, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded, ContentType.parse("application/vnd.api+json"))) {
-            val response = client.post("/api/transactions") {
+            val response = client.post("/api/card-transactions") {
                 setBody(object : OutgoingContent.ByteArrayContent() {
                     override val contentType: ContentType? = type
                     override fun bytes(): ByteArray = validRequest.toByteArray()
@@ -494,11 +494,11 @@ class TransactionRoutesTest {
     // ---- GET list ----
 
     @Test
-    fun `GET list returns seeded transactions matching the schema`() = withApp {
-        val response = client.get("/api/transactions")
+    fun `GET list returns seeded card transactions matching the schema`() = withApp {
+        val response = client.get("/api/card-transactions")
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
-        assertMatchesSchema(body, "transaction-list-response.schema.json")
+        assertMatchesSchema(body, "card-transaction-list-response.schema.json")
         val items = Json.parseToJsonElement(body).jsonObject["items"]!!
         assertEquals(SchemaInitializer.SEED.size, items.jsonArraySize())
     }
@@ -506,11 +506,11 @@ class TransactionRoutesTest {
     // ---- GET one ----
 
     @Test
-    fun `GET known id returns the transaction`() = withApp {
-        val response = client.get("/api/transactions/seed-0002")
+    fun `GET known id returns the card transaction`() = withApp {
+        val response = client.get("/api/card-transactions/seed-0002")
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
-        assertMatchesSchema(body, "transaction.schema.json")
+        assertMatchesSchema(body, "card-transaction.schema.json")
         val json = Json.parseToJsonElement(body).jsonObject
         assertEquals("Blue Bottle Coffee", json["description"]!!.jsonPrimitive.content)
         assertEquals("525", json["amount"]!!.jsonObject["amount"]!!.jsonPrimitive.content)
@@ -520,7 +520,7 @@ class TransactionRoutesTest {
 
     @Test
     fun `GET unknown id returns 404 with the error shape`() = withApp {
-        val response = client.get("/api/transactions/nope")
+        val response = client.get("/api/card-transactions/nope")
         assertEquals(HttpStatusCode.NotFound, response.status)
         val body = response.bodyAsText()
         assertMatchesSchema(body, "api-error.schema.json")
@@ -537,13 +537,13 @@ class TransactionRoutesTest {
     // ---- POST ----
 
     @Test
-    fun `POST valid transaction returns 201 and persists it`() = withApp {
-        assertMatchesSchema(validRequest, "create-transaction-request.schema.json")
+    fun `POST valid card transaction returns 201 and persists it`() = withApp {
+        assertMatchesSchema(validRequest, "create-card-transaction-request.schema.json")
 
         val response = postJson(validRequest)
         assertEquals(HttpStatusCode.Created, response.status)
         val body = response.bodyAsText()
-        assertMatchesSchema(body, "transaction.schema.json")
+        assertMatchesSchema(body, "card-transaction.schema.json")
 
         val created = Json.parseToJsonElement(body).jsonObject
         assertEquals("Lunch", created["description"]!!.jsonPrimitive.content)
@@ -552,22 +552,22 @@ class TransactionRoutesTest {
         assertEquals("COMPLETED", created["status"]!!.jsonPrimitive.content)
 
         val id = created["id"]!!.jsonPrimitive.content
-        val fetched = client.get("/api/transactions/$id")
+        val fetched = client.get("/api/card-transactions/$id")
         assertEquals(HttpStatusCode.OK, fetched.status)
         assertEquals(body, fetched.bodyAsText())
     }
 
     @Test
-    fun `POST JPY transaction round-trips zero-precision money`() = withApp {
+    fun `POST JPY card transaction round-trips zero-precision money`() = withApp {
         val response = postJson("""{"description":"Ramen","amount":{"amount":"1200","currency":"JPY"},"type":"DEBIT"}""")
         assertEquals(HttpStatusCode.Created, response.status)
         val body = response.bodyAsText()
-        assertMatchesSchema(body, "transaction.schema.json")
+        assertMatchesSchema(body, "card-transaction.schema.json")
         assertEquals("JPY", Json.parseToJsonElement(body).jsonObject["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content)
     }
 
     private suspend fun ApplicationTestBuilder.assertBadRequest(body: String, expectedMessagePart: String) {
-        assertViolatesSchema(body, "create-transaction-request.schema.json")
+        assertViolatesSchema(body, "create-card-transaction-request.schema.json")
         val response = postJson(body)
         assertEquals(HttpStatusCode.BadRequest, response.status, "body: $body -> ${response.bodyAsText()}")
         val text = response.bodyAsText()
@@ -614,7 +614,7 @@ class TransactionRoutesTest {
         assertBadRequest("""{"description":"x","amount":{"amount":"99999999999999999999","currency":"USD"},"type":"DEBIT"}""", "out of range")
         // 19 digits but > Long.MAX_VALUE: passes the schema, so only the backend can reject it.
         val nineteenDigits = """{"description":"x","amount":{"amount":"9999999999999999999","currency":"USD"},"type":"DEBIT"}"""
-        assertMatchesSchema(nineteenDigits, "create-transaction-request.schema.json")
+        assertMatchesSchema(nineteenDigits, "create-card-transaction-request.schema.json")
         val response = postJson(nineteenDigits)
         assertEquals(HttpStatusCode.BadRequest, response.status)
         assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
@@ -634,7 +634,7 @@ class TransactionRoutesTest {
     @Test
     fun `POST missing field and unknown field are 400`() = withApp {
         assertBadRequest("""{"description":"x","type":"DEBIT"}""", "missing required fields: amount")
-        // MoneyDto.amount and CreateTransactionRequest.amount share a name; the path has to tell them apart.
+        // MoneyDto.amount and CreateCardTransactionRequest.amount share a name; the path has to tell them apart.
         assertBadRequest("""{"description":"x","amount":{"currency":"USD"},"type":"DEBIT"}""", "missing required fields: amount.amount")
         assertBadRequest("""{"description":"x","amount":{"amount":"100"},"type":"DEBIT"}""", "missing required fields: amount.currency")
         assertBadRequest("""{"amount":{"amount":"100","currency":"USD"}}""", "missing required fields: description, type")
@@ -663,7 +663,7 @@ class TransactionRoutesTest {
             assertMatchesSchema(body, "api-error.schema.json")
             assertEquals(message, Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
         }
-        for (path in listOf("/api/transactions/$marker", "/$marker")) {
+        for (path in listOf("/api/card-transactions/$marker", "/$marker")) {
             val response = client.get(path)
             assertEquals(HttpStatusCode.NotFound, response.status)
             val body = response.bodyAsText()

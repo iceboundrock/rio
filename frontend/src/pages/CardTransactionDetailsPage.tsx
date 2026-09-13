@@ -1,26 +1,26 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError } from "../api/client";
-import { getTransaction } from "../api/transactions";
+import { getCardTransaction } from "../api/cardTransactions";
 import { describeError } from "../api/errors";
 import { formatSignedMoney, moneyToDecimalString } from "../money/money";
-import type { Transaction } from "../types/transaction";
+import type { CardTransaction } from "../types/cardTransaction";
 
 type State =
   | { kind: "loading" }
   | { kind: "not-found" }
   | { kind: "error"; message: string }
-  | { kind: "loaded"; transaction: Transaction };
+  | { kind: "loaded"; cardTransaction: CardTransaction };
 
-export default function TransactionDetailsPage() {
+export default function CardTransactionDetailsPage() {
   const { id = "" } = useParams();
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
-    getTransaction(id)
-      .then((transaction) => !cancelled && setState({ kind: "loaded", transaction }))
+    getCardTransaction(id)
+      .then((cardTransaction) => !cancelled && setState({ kind: "loaded", cardTransaction }))
       .catch((error: unknown) => {
         if (cancelled) return;
         if (error instanceof ApiError && error.status === 404) setState({ kind: "not-found" });
@@ -34,31 +34,31 @@ export default function TransactionDetailsPage() {
   return (
     <>
       <p>
-        <Link to="/transactions">← Back to Transactions</Link>
+        <Link to="/card-transactions">← Back to Card Transactions</Link>
       </p>
 
       {state.kind === "loading" && <p className="state">Loading…</p>}
       {state.kind === "not-found" && (
         <p className="state state-error">
-          No transaction with ID <code>{id}</code>.
+          No card transaction with ID <code>{id}</code>.
         </p>
       )}
       {state.kind === "error" && <p className="state state-error">{state.message}</p>}
-      {state.kind === "loaded" && <Details transaction={state.transaction} />}
+      {state.kind === "loaded" && <Details cardTransaction={state.cardTransaction} />}
     </>
   );
 }
 
-export function Details({ transaction }: { transaction: Transaction }) {
-  const { amount } = transaction;
+export function Details({ cardTransaction }: { cardTransaction: CardTransaction }) {
+  const { amount } = cardTransaction;
   return (
     <article className="details">
-      <h1>{transaction.description}</h1>
-      <p className={`amount amount-${transaction.type.toLowerCase()}`}>{formatSignedMoney(amount, transaction.type)}</p>
+      <h1>{cardTransaction.description}</h1>
+      <p className={`amount amount-${cardTransaction.type.toLowerCase()}`}>{formatSignedMoney(amount, cardTransaction.type)}</p>
       <dl>
-        <dt>Transaction ID</dt>
+        <dt>Card Transaction ID</dt>
         <dd>
-          <code>{transaction.id}</code>
+          <code>{cardTransaction.id}</code>
         </dd>
         <dt>Amount</dt>
         <dd>
@@ -67,14 +67,14 @@ export function Details({ transaction }: { transaction: Transaction }) {
         <dt>Currency</dt>
         <dd>{amount.currency}</dd>
         <dt>Type</dt>
-        <dd>{transaction.type}</dd>
+        <dd>{cardTransaction.type}</dd>
         <dt>Status</dt>
         <dd>
-          <span className={`badge badge-${transaction.status.toLowerCase()}`}>{transaction.status}</span>
+          <span className={`badge badge-${cardTransaction.status.toLowerCase()}`}>{cardTransaction.status}</span>
         </dd>
         <dt>Created</dt>
         <dd>
-          {transaction.createdAt.toLocaleString()} <span className="muted">({transaction.createdAtInstant})</span>
+          {cardTransaction.createdAt.toLocaleString()} <span className="muted">({cardTransaction.createdAtInstant})</span>
         </dd>
       </dl>
     </article>

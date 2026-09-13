@@ -1,4 +1,4 @@
-# Rio Starter — Transactions
+# Rio Starter — Card Transactions
 
 A deliberately small full-stack app: **Kotlin + Ktor + plain JDBC + SQLite** on the back,
 **React + TypeScript + Vite** on the front, and **shared JSON Schema** contracts in between.
@@ -17,7 +17,7 @@ Or separately:
 ```bash
 # Terminal 1 — backend on http://localhost:8080
 cd backend
-./gradlew run            # creates backend/data/rio.db, seeds 9 transactions on first start
+./gradlew run            # creates backend/data/rio.db, seeds 9 card transactions on first start
 
 # Terminal 2 — frontend on http://localhost:5173 (proxies /api to :8080)
 cd frontend
@@ -25,7 +25,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 — it redirects to `/transactions`.
+Open http://localhost:5173 — it redirects to `/card-transactions`.
 
 ## Tests and verification
 
@@ -60,32 +60,32 @@ backend/src/main/kotlin/ai/project/rio/
   Application.kt       wiring + main()
   db/                  Database (SQLite connection setup), JdbcTemplate, SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
-  transaction/         Transaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire)
+  cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire)
   http/                ApiError, ErrorHandling (exception -> status mapping)
-backend/src/test/...   MoneyTest, JdbcTemplateTest, TransactionRepositoryTest, TransactionRoutesTest,
+backend/src/test/...   MoneyTest, JdbcTemplateTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
                        contract/JsonSchemaAssertions (loads ../contracts/schemas)
 frontend/src/
-  api/                 client.ts (fetch + validate), schemas.ts (Ajv validators), transactions.ts (endpoints)
+  api/                 client.ts (fetch + validate), schemas.ts (Ajv validators), cardTransactions.ts (endpoints)
   money/               money.ts (bigint Money, formatting), money.test.ts
-  types/               transaction.ts (domain types)
-  pages/               TransactionListPage, TransactionDetailsPage
-  components/          TransactionList, TransactionRow
+  types/               cardTransaction.ts (domain types)
+  pages/               CardTransactionListPage, CardTransactionDetailsPage
+  components/          CardTransactionList, CardTransactionRow
 features/              one Markdown spec per interview feature
 ```
 
 ## API
 
-| Method | Path                      | Success | Errors                  |
-|--------|---------------------------|---------|-------------------------|
-| GET    | `/api/transactions`       | 200 `{ "items": [Transaction] }` | — |
-| GET    | `/api/transactions/{id}`  | 200 `Transaction`                | 404 |
-| POST   | `/api/transactions`       | 201 `Transaction`                | 400, 415 |
+| Method | Path                          | Success                              | Errors   |
+|--------|-------------------------------|--------------------------------------|----------|
+| GET    | `/api/card-transactions`      | 200 `{ "items": [CardTransaction] }` | —        |
+| GET    | `/api/card-transactions/{id}` | 200 `CardTransaction`                | 404      |
+| POST   | `/api/card-transactions`      | 201 `CardTransaction`                | 400, 415 |
 
 Any path also answers 405 for a method it does not route and 406 for an unsatisfiable `Accept`,
 the latter before the route runs.
 
 ```json
-// Transaction
+// CardTransaction
 {
   "id": "seed-0002",
   "description": "Blue Bottle Coffee",
@@ -106,7 +106,7 @@ the latter before the route runs.
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
-with `VALIDATION_ERROR`. Responses from the transaction POST handler advertise `Accept-Post: application/json`.
+with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
 A malformed `Content-Type` header returns 400 with `malformed Content-Type header`.
 Missing required JSON fields return 400 naming the DTO fields, qualified by their JSON path when the
 field belongs to a nested object (`amount.currency`); other malformed JSON or invalid JSON shapes
@@ -153,7 +153,7 @@ structured suffix types such as `application/vnd.api+json` are not registered an
 Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, database, and UI.
 If an existing local database predates this currency set, stop the backend and delete
 `backend/data/rio.db` (or your configured `RIO_DB_PATH`) before restarting. This resets local
-transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
+card transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
 Startup checks the stored table DDL against the current definition and stops with reset instructions
 if they differ, before serving requests. The check normalizes SQLite's `CREATE TABLE` prefix and
 trailing whitespace/semicolon, but compares the column/constraint body exactly. This is not SQL
@@ -162,19 +162,19 @@ semantic equivalence: manually reformatted bodies or modified definitions also r
 ## How a request flows
 
 ```text
-React Page              pages/TransactionListPage.tsx
+React Page              pages/CardTransactionListPage.tsx
   ↓
-API module              api/transactions.ts  (calls api/client.ts)
+API module              api/cardTransactions.ts (calls api/client.ts)
   ↓
 JSON Schema validation  api/schemas.ts        (Ajv, contracts/schemas/*.json)
   ↓  HTTP /api/...  (Vite proxies to :8080 in dev)
-Ktor Route              transaction/TransactionRoutes.kt   (DTO <-> domain, status codes)
+Ktor Route              cardtransaction/CardTransactionRoutes.kt     (DTO <-> domain, status codes)
   ↓
-Service                 transaction/TransactionService.kt  (business rules, ids, timestamps)
+Service                 cardtransaction/CardTransactionService.kt    (business rules, ids, timestamps)
   ↓
-Repository              transaction/TransactionRepository.kt (SQL, row <-> Transaction)
+Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction)
   ↓
-JdbcTemplate            db/JdbcTemplate.kt   (prepare, bind, map, close, transaction)
+JdbcTemplate            db/JdbcTemplate.kt   (prepare, bind, map, close, withTransaction)
   ↓
 SQLite                  backend/data/rio.db
 ```
@@ -207,7 +207,7 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 - Backend `Money(amount: Long, currency)` supports `+`, `-`, `compareTo`, `sumMoney()`, `split(n)`,
   `allocate(weights)`, and `multiply(Ratio, MoneyRounding)`. Every binary op checks currency;
   every op uses checked arithmetic; split/allocate never lose a minor unit.
-- A `Transaction.amount` is a magnitude (> 0); `type` gives the direction. The UI renders
+- A `CardTransaction.amount` is a magnitude (> 0); `type` gives the direction. The UI renders
   `DEBIT 525 USD` as `-$5.25` and `CREDIT` as `+$5.25`.
 - Frontend `Money { amount: bigint, currency }` with `moneyToDecimalString` and `formatMoney`
   implemented on strings/bigint, exact for any magnitude.
@@ -229,20 +229,20 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 ## JDBC: baseline and optional operations
 
 Start with `query` (list), `queryOne` (row or null), and `update` (write/DDL).
-`TransactionRepository` uses these three operations and owns all SQL and row mapping.
+`CardTransactionRepository` uses these three operations and owns all SQL and row mapping.
 `JdbcTemplate` opens a connection per standalone operation. `JdbcExecutor` is also implemented
 by the transaction-scoped executor, which reuses one connection for the entire callback.
 
 Single-statement writes use the repository directly; SQLite already makes each statement atomic.
-`TransactionService` receives a `TransactionRepository`, which can also be bound to an outer
+`CardTransactionService` receives a `CardTransactionRepository`, which can also be bound to an outer
 transaction's executor. A future service owning multi-statement writes can receive `JdbcTemplate`
 and construct every participating repository from `tx`. For example:
 
 ```kotlin
-jdbc.transaction { tx ->
-    val repository = TransactionRepository(tx)
-    repository.insert(firstTransaction)
-    repository.insert(secondTransaction)
+jdbc.withTransaction { tx ->
+    val repository = CardTransactionRepository(tx)
+    repository.insert(firstCardTransaction)
+    repository.insert(secondCardTransaction)
 }
 ```
 

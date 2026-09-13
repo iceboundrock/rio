@@ -6,7 +6,7 @@ human/AI surface: agree on it first, then implement against it. Keep specs short
 Suggested naming:
 
 ```text
-features/add-transaction-filter.md
+features/add-card-transaction-filter.md
 features/add-pagination.md
 features/add-categories.md
 features/add-transfer.md
@@ -45,7 +45,7 @@ What user or engineering problem are we solving?
 1. Update `contracts/schemas/*.schema.json` first.
 2. Update backend DTOs, route, service, repository (in that order of visibility).
 3. Add or extend route tests; they must schema-validate real responses.
-4. Update frontend wire types in `src/api/schemas.ts` and the mapper in `src/api/transactions.ts`.
+4. Update frontend wire types in `src/api/schemas.ts` and the mapper in `src/api/cardTransactions.ts`.
 5. Update pages/components.
 6. Run `./verify.sh`.
 

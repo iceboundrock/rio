@@ -20,7 +20,7 @@
   },
   "$defs": {
     "positive": {
-      "description": "Money whose amount is strictly greater than zero. Used for transaction magnitudes.",
+      "description": "Money whose amount is strictly greater than zero. Used for card transaction magnitudes.",
       "allOf": [
         { "$ref": "#" },
         {

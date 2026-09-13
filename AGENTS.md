@@ -14,12 +14,12 @@ This repository is optimized for short AI-assisted coding exercises. Read this w
 
 - Ktor only; do not introduce Spring.
 - Plain JDBC only; do not introduce an ORM, Exposed, jOOQ, or a DI container.
-- SQL lives in concrete repositories (`transaction/TransactionRepository.kt`). Always bind values with `?` parameters; never interpolate.
+- SQL lives in concrete repositories (`cardtransaction/CardTransactionRepository.kt`). Always bind values with `?` parameters; never interpolate.
 - `db/JdbcTemplate.kt` handles JDBC mechanics only. It must not learn about Money or any domain type.
-- Business rules belong in services (`transaction/TransactionService.kt`).
+- Business rules belong in services (`cardtransaction/CardTransactionService.kt`).
 - HTTP translation belongs in routes and `http/ErrorHandling.kt`. Throw `ValidationException` (400) or `NotFoundException` (404).
 - Do not create generic repository hierarchies or interfaces with a single implementation.
-- Multi-statement writes go inside `jdbc.transaction { tx -> ... }` and use `tx` for every statement.
+- Multi-statement writes go inside `jdbc.withTransaction { tx -> ... }` and use `tx` for every statement.
 - Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and delete `backend/data/rio.db`.
 
 ## Money
@@ -34,7 +34,7 @@ Money is a domain value: `integer minor-unit amount + Currency`.
 - HTTP money amounts are base-10 integer strings: `{ "amount": "1250", "currency": "USD" }`.
 - Backend Money uses `Long` minor units (`money/Money.kt`). Frontend Money uses `bigint` (`src/money/money.ts`).
 - SQLite stores `amount_minor INTEGER` + `currency TEXT`. That representation must not leak above the repository.
-- Transaction `amount` is a magnitude (> 0); direction comes from `type` (CREDIT/DEBIT).
+- CardTransaction `amount` is a magnitude (> 0); direction comes from `type` (CREDIT/DEBIT).
 - Splitting and allocation must preserve every minor unit (`Money.split`, `Money.allocate`).
 - Percentage calculations use an integer `Ratio` plus an explicit `MoneyRounding`; never `amount * 0.0825`.
 - Arithmetic is checked (`Math.addExact` etc.). Do not replace it with wrapping arithmetic.
@@ -43,12 +43,12 @@ Money is a domain value: `integer minor-unit amount + Currency`.
 Never aggregate or compare mixed currencies as if they were one currency.
 
     -- Bad: mixes USD, EUR and JPY minor units
-    SELECT SUM(amount_minor) FROM transactions;
-    SELECT * FROM transactions WHERE amount_minor >= ?;
+    SELECT SUM(amount_minor) FROM card_transactions;
+    SELECT * FROM card_transactions WHERE amount_minor >= ?;
 
     -- Good: currency is always part of the semantics
-    SELECT currency, SUM(amount_minor) FROM transactions GROUP BY currency;
-    SELECT * FROM transactions WHERE currency = ? AND amount_minor >= ?;
+    SELECT currency, SUM(amount_minor) FROM card_transactions GROUP BY currency;
+    SELECT * FROM card_transactions WHERE currency = ? AND amount_minor >= ?;
 
 Global ordering by `amount_minor` across currencies is meaningless; scope it by currency or do not offer it.
 
