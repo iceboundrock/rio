@@ -1,4 +1,4 @@
-// Transaction endpoints. Pages call these and receive domain objects (bigint Money, Date timestamps).
+// Transaction endpoints. Pages call these and receive domain objects (bigint Money, Date timestamps plus the verbatim createdAt instant).
 
 import { ApiContractError, getJson, postJson } from "./client";
 import {
@@ -25,6 +25,7 @@ function fromJson(json: TransactionJson, url: string): Transaction {
     type: json.type,
     status: json.status,
     createdAt,
+    createdAtInstant: json.createdAt,
   };
 }
 

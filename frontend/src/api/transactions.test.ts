@@ -32,6 +32,7 @@ describe("transaction API boundary", () => {
       const [result] = await getTransactions();
       expect(result.amount).toEqual({ amount: 9223372036854775807n, currency });
       expect(result.createdAt.toISOString()).toBe("2026-09-02T15:30:00.123Z");
+      expect(result.createdAtInstant).toBe("2026-09-02T15:30:00.123456789Z");
       expect(formatMoney({ amount: 125n, currency })).toBe(expected[currency]);
     }
   });
@@ -65,9 +66,11 @@ describe("transaction API boundary", () => {
     await expect(getTransactions()).rejects.toBeInstanceOf(ApiContractError);
   });
 
-  it.each(["2024-02-29T12:00:00Z", "2026-09-02T00:00:00.000000001Z"])("accepts valid instant %s", async (createdAt) => {
+  it.each(["2024-02-29T12:00:00Z", "2026-09-02T00:00:00.000000001Z"])("accepts valid instant %s and keeps it exactly", async (createdAt) => {
     respond({ ...transaction, createdAt });
-    expect((await getTransaction("tx-1")).createdAt.getTime()).toBe(new Date(createdAt).getTime());
+    const result = await getTransaction("tx-1");
+    expect(result.createdAt.getTime()).toBe(new Date(createdAt).getTime());
+    expect(result.createdAtInstant).toBe(createdAt);
   });
 
   it("distinguishes server errors, malformed error bodies, and non-JSON success", async () => {
