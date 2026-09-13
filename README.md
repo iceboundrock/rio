@@ -66,9 +66,11 @@ backend/src/main/kotlin/ai/project/rio/
   db/                  Database (SQLite connection setup), JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
   cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire)
-  http/                ApiError, ErrorHandling (exception -> status mapping)
+  http/                ApiError, ErrorHandling (exception -> status mapping), JsonConverter (fastjson2 <-> HTTP bodies),
+                       JsonSyntax (RFC 8259 grammar check), EcmaScript (the whitespace set JSON Schema `\s` means)
 backend/src/test/...   MoneyTest, JdbcTemplateTest, TransactionalServiceTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
-                       contract/JsonSchemaAssertions (loads ../contracts/schemas)
+                       contract/JsonSchemaAssertions (fastjson2 JSONSchema over ../contracts/schemas with $refs inlined and
+                       `pattern`s translated from ECMAScript to Java regex), JsonSchemaAssertionsTest, EcmaScriptPatternsTest, JsonSyntaxTest
 frontend/src/
   api/                 client.ts (fetch + validate), schemas.ts (Ajv validators), cardTransactions.ts (endpoints)
   money/               money.ts (bigint Money, formatting), money.test.ts
@@ -117,17 +119,21 @@ the latter before the route runs.
 Decimals, exponents, signs, and symbols are rejected. The server assigns `id`, `status` (`COMPLETED`), and `createdAt`.
 
 An array body must have at least one item and is inserted in one database transaction: if any item is
-invalid the request is 400 and nothing is persisted. Validation messages for array items carry the item
-index (`missing required fields: [1].amount.currency`). Any other JSON kind (`true`, `"x"`, `42`) is
+invalid the request is 400 and nothing is persisted. Any other JSON kind (`true`, `"x"`, `42`, `null`) is
 `malformed request body`.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
 A malformed `Content-Type` header returns 400 with `malformed Content-Type header`.
-Missing required JSON fields return 400 naming the DTO fields, qualified by their JSON path when the
-field belongs to a nested object (`amount.currency`); other malformed JSON or invalid JSON shapes
-return 400 with `malformed request body`. Validation error *responses* describe constraints without
-echoing request values; server logs are not redacted and still record the full request line.
+A body that cannot be read - not RFC 8259 JSON (comments, trailing commas and a byte order mark
+included, which fastjson2 alone would accept), a missing or unknown field, the wrong JSON kind for a
+field (a number, boolean, object or array where the contract says string) - returns 400 with
+`malformed request body` and names nothing from the input.
+A description is blank when every character is ECMAScript whitespace, the set the contract's
+`pattern: "\S"` means; that includes U+00A0 and U+FEFF and excludes U+001C..U+001F, unlike Kotlin's
+`isBlank`. The stored description is trimmed by the same set.
+Validation error *responses* describe constraints without echoing request values; server logs are
+not redacted and still record the full request line.
 A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.
 Error responses are explicitly serialized as JSON regardless of `Accept`, including the status the
 framework raises on its own: an unroutable method returns 405 `method not allowed`.
@@ -239,8 +245,8 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | Integer minor units, never floating point | Exactness. `0.1 + 0.2` is not a thing here. |
 | JSON amounts as integer *strings* | JS `number` can't hold all 64-bit values; strings can. |
 | `bigint` in the browser | Same reason; formatting is done on digits, not floats. |
-| Hand-written DTOs and TS wire types | No code generation step; the schema tests catch drift. |
-| Shared JSON Schema, validated on both sides | One contract, executable in backend tests and at frontend runtime. |
+| Hand-written DTOs and TS wire types | No code generation step; fastjson2 binds the DTO constructors, the schema tests catch drift. |
+| Shared JSON Schema, validated on both sides | One contract, executable in backend tests (fastjson2 `JSONSchema`, `$ref`s inlined and `pattern`s rewritten from ECMAScript to Java regex at load, RFC 8259 grammar checked before validating) and at frontend runtime (Ajv). |
 | Thin layers, no interfaces-with-one-impl, no DI | Small enough to hold in your head. |
 | `TransactionalService` base class for services that write more than one row | One place that knows how to start a transaction; services stay free of connection handling and repositories stay free of business rules. |
 | One `POST /api/card-transactions` accepting an object or an array | No second endpoint to keep in sync; the array form exercises the transactional path end to end. |

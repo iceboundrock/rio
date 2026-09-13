@@ -5,12 +5,14 @@ import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
 import ai.project.rio.db.Database
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.http.configureErrorHandling
+import ai.project.rio.http.fastjson2
 import ai.project.rio.module
 import ai.project.rio.money.Currency
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.alibaba.fastjson2.JSON
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -21,7 +23,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.http.contentType
-import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.install
@@ -44,9 +45,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Exercises the real Ktor pipeline against a temporary SQLite file and validates every
@@ -117,7 +115,7 @@ class CardTransactionRoutesTest {
         val status: Int get() = head.substringBefore("\r\n").split(" ")[1].toInt()
         val raw: String get() = "$head\r\n\r\n$body"
         fun hasHeader(line: String): Boolean = head.lineSequence().any { it.equals(line, ignoreCase = true) }
-        fun message(): String = Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content
+        fun message(): String = JSON.parseObject(body).getString("message")
     }
 
     @Test
@@ -141,7 +139,7 @@ class CardTransactionRoutesTest {
             assertTrue(response.hasHeader("Accept-Post: application/json"))
             assertMatchesSchema(response.body, if (status == 201) "card-transaction.schema.json" else "api-error.schema.json")
             if (message != null) {
-                assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
+                assertEquals("VALIDATION_ERROR", JSON.parseObject(response.body).getString("code"))
                 assertEquals(message, response.message())
             }
         }
@@ -313,7 +311,7 @@ class CardTransactionRoutesTest {
                 assertTrue(response.hasHeader("Vary: Accept"), context)
                 assertMatchesSchema(response.body, if (expectedError != null) "api-error.schema.json" else schema)
                 if (expectedError != null) {
-                    assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(response.body).jsonObject["code"]!!.jsonPrimitive.content)
+                    assertEquals("VALIDATION_ERROR", JSON.parseObject(response.body).getString("code"))
                     assertEquals(expectedError.second, response.message())
                 }
                 // The write is the side effect a rejected request must not leave behind.
@@ -391,7 +389,7 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.InternalServerError, response.status)
         val body = response.bodyAsText()
         assertMatchesSchema(body, "api-error.schema.json")
-        assertEquals("INTERNAL_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals("INTERNAL_ERROR", JSON.parseObject(body).getString("code"))
     }
 
     @Test
@@ -402,7 +400,7 @@ class CardTransactionRoutesTest {
             logger = log as Logger
             logger.addAppender(events)
             install(ContentNegotiation) {
-                json()
+                fastjson2()
                 // Valid JSON can no longer be converted to the request DTO; responses still serialize.
                 ignoreType<CreateCardTransactionsBody>()
             }
@@ -413,7 +411,7 @@ class CardTransactionRoutesTest {
             val response = postJson(validRequest)
             assertEquals(HttpStatusCode.InternalServerError, response.status)
             assertMatchesSchema(response.bodyAsText(), "api-error.schema.json")
-            assertEquals("INTERNAL_ERROR", Json.parseToJsonElement(response.bodyAsText()).jsonObject["code"]!!.jsonPrimitive.content)
+            assertEquals("INTERNAL_ERROR", JSON.parseObject(response.bodyAsText()).getString("code"))
             assertTrue(events.list.any {
                 it.level == Level.WARN && it.formattedMessage.contains("ContentNegotiation configuration") &&
                     it.throwableProxy?.className == "io.ktor.server.plugins.CannotTransformContentToTypeException"
@@ -434,10 +432,10 @@ class CardTransactionRoutesTest {
             assertEquals(HttpStatusCode.Created, response.status)
             val body = response.bodyAsText()
             assertMatchesSchema(body, "card-transaction.schema.json")
-            val json = Json.parseToJsonElement(body).jsonObject
-            assertEquals(currency.code, json["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content)
-            assertEquals("9223372036854775807", json["amount"]!!.jsonObject["amount"]!!.jsonPrimitive.content)
-            val fetched = client.get("/api/card-transactions/${json["id"]!!.jsonPrimitive.content}")
+            val json = JSON.parseObject(body)
+            assertEquals(currency.code, json.getJSONObject("amount").getString("currency"))
+            assertEquals("9223372036854775807", json.getJSONObject("amount").getString("amount"))
+            val fetched = client.get("/api/card-transactions/${json.getString("id")}")
             assertEquals(HttpStatusCode.OK, fetched.status)
             assertEquals(body, fetched.bodyAsText())
         }
@@ -465,9 +463,9 @@ class CardTransactionRoutesTest {
             assertEquals("application/json", response.headers["Accept-Post"])
             val body = response.bodyAsText()
             assertMatchesSchema(body, "api-error.schema.json")
-            assertEquals("VALIDATION_ERROR", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
+            assertEquals("VALIDATION_ERROR", JSON.parseObject(body).getString("code"))
             val message = if (type == null) "missing Content-Type" else "unsupported Content-Type"
-            assertEquals(message, Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
+            assertEquals(message, JSON.parseObject(body).getString("message"))
         }
     }
 
@@ -486,9 +484,9 @@ class CardTransactionRoutesTest {
         assertEquals(null, response.headers["Accept-Post"])
         val body = response.bodyAsText()
         assertMatchesSchema(body, "api-error.schema.json")
-        val error = Json.parseToJsonElement(body).jsonObject
-        assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
-        assertEquals("unsupported Content-Type", error["message"]!!.jsonPrimitive.content)
+        val error = JSON.parseObject(body)
+        assertEquals("VALIDATION_ERROR", error.getString("code"))
+        assertEquals("unsupported Content-Type", error.getString("message"))
     }
 
     // ---- GET list ----
@@ -499,8 +497,7 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
         assertMatchesSchema(body, "card-transaction-list-response.schema.json")
-        val items = Json.parseToJsonElement(body).jsonObject["items"]!!
-        assertEquals(SchemaInitializer.SEED.size, items.jsonArraySize())
+        assertEquals(SchemaInitializer.SEED.size, JSON.parseObject(body).getJSONArray("items").size)
     }
 
     // ---- GET one ----
@@ -511,11 +508,11 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.OK, response.status)
         val body = response.bodyAsText()
         assertMatchesSchema(body, "card-transaction.schema.json")
-        val json = Json.parseToJsonElement(body).jsonObject
-        assertEquals("Blue Bottle Coffee", json["description"]!!.jsonPrimitive.content)
-        assertEquals("525", json["amount"]!!.jsonObject["amount"]!!.jsonPrimitive.content)
-        assertEquals("USD", json["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content)
-        assertEquals("2026-09-02T15:30:00Z", json["createdAt"]!!.jsonPrimitive.content)
+        val json = JSON.parseObject(body)
+        assertEquals("Blue Bottle Coffee", json.getString("description"))
+        assertEquals("525", json.getJSONObject("amount").getString("amount"))
+        assertEquals("USD", json.getJSONObject("amount").getString("currency"))
+        assertEquals("2026-09-02T15:30:00Z", json.getString("createdAt"))
     }
 
     @Test
@@ -524,7 +521,7 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.NotFound, response.status)
         val body = response.bodyAsText()
         assertMatchesSchema(body, "api-error.schema.json")
-        assertEquals("NOT_FOUND", Json.parseToJsonElement(body).jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals("NOT_FOUND", JSON.parseObject(body).getString("code"))
     }
 
     @Test
@@ -545,13 +542,13 @@ class CardTransactionRoutesTest {
         val body = response.bodyAsText()
         assertMatchesSchema(body, "card-transaction.schema.json")
 
-        val created = Json.parseToJsonElement(body).jsonObject
-        assertEquals("Lunch", created["description"]!!.jsonPrimitive.content)
-        assertEquals("1800", created["amount"]!!.jsonObject["amount"]!!.jsonPrimitive.content)
-        assertEquals("DEBIT", created["type"]!!.jsonPrimitive.content)
-        assertEquals("COMPLETED", created["status"]!!.jsonPrimitive.content)
+        val created = JSON.parseObject(body)
+        assertEquals("Lunch", created.getString("description"))
+        assertEquals("1800", created.getJSONObject("amount").getString("amount"))
+        assertEquals("DEBIT", created.getString("type"))
+        assertEquals("COMPLETED", created.getString("status"))
 
-        val id = created["id"]!!.jsonPrimitive.content
+        val id = created.getString("id")
         val fetched = client.get("/api/card-transactions/$id")
         assertEquals(HttpStatusCode.OK, fetched.status)
         assertEquals(body, fetched.bodyAsText())
@@ -563,7 +560,7 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.Created, response.status)
         val body = response.bodyAsText()
         assertMatchesSchema(body, "card-transaction.schema.json")
-        assertEquals("JPY", Json.parseToJsonElement(body).jsonObject["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content)
+        assertEquals("JPY", JSON.parseObject(body).getJSONObject("amount").getString("currency"))
     }
 
     private suspend fun ApplicationTestBuilder.assertBadRequest(body: String, expectedMessagePart: String) {
@@ -572,15 +569,40 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.BadRequest, response.status, "body: $body -> ${response.bodyAsText()}")
         val text = response.bodyAsText()
         assertMatchesSchema(text, "api-error.schema.json")
-        val error = Json.parseToJsonElement(text).jsonObject
-        assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
-        val message = error["message"]!!.jsonPrimitive.content
+        val error = JSON.parseObject(text)
+        assertEquals("VALIDATION_ERROR", error.getString("code"))
+        val message = error.getString("message")
         assertTrue(message.contains(expectedMessagePart), "expected '$expectedMessagePart' in: $message")
+        assertNoParserDiagnostic(text)
+    }
+
+    /** fastjson2 messages name the unknown key, the failing constructor, or quote the input. */
+    private fun assertNoParserDiagnostic(text: String) {
+        for (marker in listOf("Unknown Property", "constructor", "fastjson", "offset")) {
+            assertTrue(!text.contains(marker), "parser diagnostic leaked: $text")
+        }
     }
 
     @Test
     fun `POST blank description is 400`() = withApp {
         assertBadRequest("""{"description":"   ","amount":{"amount":"100","currency":"USD"},"type":"DEBIT"}""", "description")
+    }
+
+    /**
+     * Blank is what the contract's `pattern: "\S"` says it is, in ECMAScript terms: U+FEFF and the
+     * Unicode space separators count, U+001C does not. Kotlin's isBlank disagrees on both counts, and
+     * a description it accepted would come back to the browser as a response Ajv rejects.
+     */
+    @Test
+    fun `POST description blank by the contract is 400 and trimmed by the same rule`() = withApp {
+        for (blank in listOf("\uFEFF", "\u00A0", "\u2003\u3000", " \uFEFF\u2028 ")) {
+            assertBadRequest(validRequest.replace("Lunch", blank), "description")
+        }
+        val response = postJson(validRequest.replace("Lunch", "\uFEFF \\u001CLunch\u3000"))
+        assertEquals(HttpStatusCode.Created, response.status, response.bodyAsText())
+        val body = response.bodyAsText()
+        assertMatchesSchema(body, "card-transaction.schema.json")
+        assertEquals("\u001CLunch", JSON.parseObject(body).getString("description"))
     }
 
     @Test
@@ -603,9 +625,56 @@ class CardTransactionRoutesTest {
         assertBadRequest("""{"description":"x","amount":{"amount":"1e3","currency":"USD"},"type":"DEBIT"}""", "integer string")
     }
 
+    /**
+     * fastjson2 would bind a JSON number, boolean, object or array into a String field by stringifying
+     * it; the contract types every scalar as string, so the converter's String reader refuses them.
+     * Each case would otherwise persist and answer 201.
+     */
     @Test
-    fun `POST numeric JSON amount is 400`() = withApp {
-        assertBadRequest("""{"description":"x","amount":{"amount":1800,"currency":"USD"},"type":"DEBIT"}""", "malformed request body")
+    fun `POST non-string scalars are 400 for every string field`() = withApp {
+        val fields = listOf("\"description\":\"Lunch\"" to "description", "\"amount\":\"1800\"" to "amount", "\"currency\":\"USD\"" to "currency", "\"type\":\"DEBIT\"" to "type")
+        val kinds = listOf("1800", "1.5", "true", "null", "{\"secret-hunter2\":1}", "[\"Lunch\"]", "{}", "[]")
+        for ((field, name) in fields) {
+            for (kind in kinds) {
+                val body = validRequest.replace(field, "\"$name\":$kind").also { check(it != validRequest) }
+                assertViolatesSchema(body, "create-card-transaction-request.schema.json")
+                assertMalformedBody(body)
+                assertMalformedBody("[$body]")
+            }
+        }
+    }
+
+    /**
+     * fastjson2 parses comments and trailing commas as if they were JSON; RFC 8259 has neither, and
+     * the README promises 400 for malformed JSON, so the converter checks the grammar first.
+     */
+    @Test
+    fun `POST non-RFC 8259 syntax is 400`() = withApp {
+        for (body in listOf(
+            validRequest.dropLast(1) + ",}",
+            validRequest.replace("\"USD\"}", "\"USD\",}"),
+            "[$validRequest,]",
+            "$validRequest/* secret-hunter2 */",
+            validRequest.replace("\"Lunch\",", "\"Lunch\",/* secret-hunter2 */"),
+            "$validRequest// secret-hunter2",
+            "// secret-hunter2\n$validRequest",
+            validRequest.replace("\"Lunch\",", "\"Lunch\",// secret-hunter2\n"),
+            "\uFEFF$validRequest",
+            "$validRequest$validRequest",
+        )) {
+            assertMalformedBody(body)
+        }
+    }
+
+    private suspend fun ApplicationTestBuilder.assertMalformedBody(body: String) {
+        val before = listIds()
+        val response = postJson(body)
+        assertEquals(HttpStatusCode.BadRequest, response.status, "body: $body -> ${response.bodyAsText()}")
+        val text = response.bodyAsText()
+        assertMatchesSchema(text, "api-error.schema.json")
+        assertEquals("malformed request body", JSON.parseObject(text).getString("message"), "body: $body")
+        assertTrue(!text.contains("secret-hunter2"), "request input leaked: $text")
+        assertEquals(before, listIds(), "a rejected body must not persist anything: $body")
     }
 
     @Test
@@ -633,12 +702,14 @@ class CardTransactionRoutesTest {
 
     @Test
     fun `POST missing field and unknown field are 400`() = withApp {
-        assertBadRequest("""{"description":"x","type":"DEBIT"}""", "missing required fields: amount")
-        // MoneyDto.amount and CreateCardTransactionRequest.amount share a name; the path has to tell them apart.
-        assertBadRequest("""{"description":"x","amount":{"currency":"USD"},"type":"DEBIT"}""", "missing required fields: amount.amount")
-        assertBadRequest("""{"description":"x","amount":{"amount":"100"},"type":"DEBIT"}""", "missing required fields: amount.currency")
-        assertBadRequest("""{"amount":{"amount":"100","currency":"USD"}}""", "missing required fields: description, type")
+        // A missing field fails the DTO constructor's null check inside fastjson2, which reports the
+        // constructor rather than the field, so the response names no field at all.
+        assertBadRequest("""{"description":"x","type":"DEBIT"}""", "malformed request body")
+        assertBadRequest("""{"description":"x","amount":{"currency":"USD"},"type":"DEBIT"}""", "malformed request body")
+        assertBadRequest("""{"description":"x","amount":{"amount":"100"},"type":"DEBIT"}""", "malformed request body")
+        assertBadRequest("""{"amount":{"amount":"100","currency":"USD"}}""", "malformed request body")
         assertBadRequest("""{"description":"x","amount":{"amount":"100","currency":"USD"},"type":"DEBIT","extra":1}""", "malformed request body")
+        assertBadRequest("""{"description":"x","amount":{"amount":"100","currency":"USD","extra":1},"type":"DEBIT"}""", "malformed request body")
     }
 
     @Test
@@ -661,7 +732,7 @@ class CardTransactionRoutesTest {
             assertEquals(HttpStatusCode.BadRequest, response.status)
             val body = response.bodyAsText()
             assertMatchesSchema(body, "api-error.schema.json")
-            assertEquals(message, Json.parseToJsonElement(body).jsonObject["message"]!!.jsonPrimitive.content)
+            assertEquals(message, JSON.parseObject(body).getString("message"))
         }
         for (path in listOf("/api/card-transactions/$marker", "/$marker")) {
             val response = client.get(path)
@@ -676,14 +747,15 @@ class CardTransactionRoutesTest {
     fun `parser failures do not echo request input or unknown keys`() = withApp {
         for (body in listOf(
             "password=hunter2&card=4111111111111111",
+            // fastjson2's own diagnostic here is `Unknown Property secret-hunter2`.
             validRequest.dropLast(1) + " ,\"secret-hunter2\":1}",
-            validRequest.replace("\"description\":\"Lunch\"", "\"description\":{\"secret-hunter2\":1}"),
+            validRequest.replace("\"description\":\"Lunch\"", "\"description\":{\"secret-hunter2\":1},\"extra\":1"),
         )) {
             val response = postJson(body)
             assertEquals(HttpStatusCode.BadRequest, response.status)
             val text = response.bodyAsText()
             assertMatchesSchema(text, "api-error.schema.json")
-            assertEquals("malformed request body", Json.parseToJsonElement(text).jsonObject["message"]!!.jsonPrimitive.content)
+            assertEquals("malformed request body", JSON.parseObject(text).getString("message"))
         }
     }
 
@@ -692,8 +764,8 @@ class CardTransactionRoutesTest {
     private val secondRequest = """{"description":"Ramen","amount":{"amount":"1200","currency":"JPY"},"type":"CREDIT"}"""
 
     private suspend fun ApplicationTestBuilder.listIds(): List<String> =
-        (Json.parseToJsonElement(client.get("/api/card-transactions").bodyAsText()).jsonObject["items"] as kotlinx.serialization.json.JsonArray)
-            .map { it.jsonObject["id"]!!.jsonPrimitive.content }
+        JSON.parseObject(client.get("/api/card-transactions").bodyAsText()).getJSONArray("items")
+            .let { items -> items.indices.map { items.getJSONObject(it).getString("id") } }
 
     private suspend fun ApplicationTestBuilder.assertBadRequestArray(body: String, expectedMessagePart: String) {
         assertViolatesSchema(body, "create-card-transactions-request.schema.json")
@@ -702,10 +774,11 @@ class CardTransactionRoutesTest {
         assertEquals(HttpStatusCode.BadRequest, response.status, "body: $body -> ${response.bodyAsText()}")
         val text = response.bodyAsText()
         assertMatchesSchema(text, "api-error.schema.json")
-        val error = Json.parseToJsonElement(text).jsonObject
-        assertEquals("VALIDATION_ERROR", error["code"]!!.jsonPrimitive.content)
-        val message = error["message"]!!.jsonPrimitive.content
+        val error = JSON.parseObject(text)
+        assertEquals("VALIDATION_ERROR", error.getString("code"))
+        val message = error.getString("message")
         assertTrue(message.contains(expectedMessagePart), "expected '$expectedMessagePart' in: $message")
+        assertNoParserDiagnostic(text)
         assertEquals(before, listIds(), "a rejected array body must not persist anything")
     }
 
@@ -720,13 +793,14 @@ class CardTransactionRoutesTest {
         val body = response.bodyAsText()
         assertMatchesSchema(body, "card-transaction-list-response.schema.json")
 
-        val items = Json.parseToJsonElement(body).jsonObject["items"] as kotlinx.serialization.json.JsonArray
-        assertEquals(listOf("Lunch", "Ramen"), items.map { it.jsonObject["description"]!!.jsonPrimitive.content })
-        assertEquals(listOf("USD", "JPY"), items.map { it.jsonObject["amount"]!!.jsonObject["currency"]!!.jsonPrimitive.content })
+        val items = JSON.parseObject(body).getJSONArray("items").let { array -> array.indices.map { array.getJSONObject(it) } }
+        assertEquals(listOf("Lunch", "Ramen"), items.map { it.getString("description") })
+        assertEquals(listOf("USD", "JPY"), items.map { it.getJSONObject("amount").getString("currency") })
         for (item in items) {
-            val fetched = client.get("/api/card-transactions/${item.jsonObject["id"]!!.jsonPrimitive.content}")
+            val fetched = client.get("/api/card-transactions/${item.getString("id")}")
             assertEquals(HttpStatusCode.OK, fetched.status)
-            assertEquals(item.toString(), fetched.bodyAsText())
+            // Parsed, not text: the assertion is about the resource, not the writer's field order.
+            assertEquals(item, JSON.parseObject(fetched.bodyAsText()))
         }
     }
 
@@ -750,10 +824,28 @@ class CardTransactionRoutesTest {
     }
 
     @Test
-    fun `POST array missing field reports the item index`() = withApp {
+    fun `POST array item failures are 400`() = withApp {
         assertBadRequestArray("[$validRequest,${secondRequest.replace("\"currency\":\"JPY\"", "\"currency\":\"JPY\",\"x\":1")}]", "malformed request body")
-        assertBadRequestArray("[$validRequest,{\"description\":\"x\",\"amount\":{\"currency\":\"USD\"},\"type\":\"DEBIT\"}]", "missing required fields: [1].amount.amount")
-        assertBadRequestArray("[{\"amount\":{\"amount\":\"100\",\"currency\":\"USD\"}}]", "missing required fields: [0].description, [0].type")
+        assertBadRequestArray("[$validRequest,{\"description\":\"x\",\"amount\":{\"currency\":\"USD\"},\"type\":\"DEBIT\"}]", "malformed request body")
+        assertBadRequestArray("[{\"amount\":{\"amount\":\"100\",\"currency\":\"USD\"}}]", "malformed request body")
+    }
+
+    @Test
+    fun `POST array with a null or scalar item is 400`() = withApp {
+        // readArray hands back null for a null element; the body reader must refuse it before the
+        // route dereferences it, or a client mistake would surface as a 500.
+        for (body in listOf("[null]", "[$validRequest,null]", "[42]", "[\"x\"]")) {
+            assertBadRequestArray(body, "malformed request body")
+        }
+    }
+
+    @Test
+    fun `POST a ref body is data, not a pointer`() = withApp {
+        // Without DisableReferenceDetect fastjson2 resolves `$ref` inside the document being parsed
+        // and hands the route an aliased or null item, which used to be a 500.
+        for (body in listOf("[{\"\$ref\":\"$\"}]", "{\"\$ref\":\"#\"}", "[$validRequest,{\"\$ref\":\"$[0]\"}]")) {
+            assertBadRequestArray(body, "malformed request body")
+        }
     }
 
     @Test
@@ -762,7 +854,4 @@ class CardTransactionRoutesTest {
             assertBadRequestArray(body, "malformed request body")
         }
     }
-
-    private fun kotlinx.serialization.json.JsonElement.jsonArraySize(): Int =
-        (this as kotlinx.serialization.json.JsonArray).size
 }
