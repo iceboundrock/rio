@@ -1,5 +1,6 @@
 package ai.project.rio.cardtransaction
 
+import ai.project.rio.http.ValidationException
 import ai.project.rio.http.atItemIndex
 import ai.project.rio.http.methodNotAllowed
 import ai.project.rio.http.receiveJson
@@ -36,15 +37,17 @@ fun Route.cardTransactionRoutes(service: CardTransactionService) {
         }
 
         post {
+            // Minimal read so the service signature compiles; the full header rules follow in #54.
+            val idempotencyKey = call.request.headers["Idempotency-Key"] ?: throw ValidationException("missing Idempotency-Key header")
             when (val body = call.receiveJson<CreateCardTransactionsBody>()) {
                 is CreateCardTransactionsBody.One -> {
-                    val created = service.create(body.request.toNewCardTransaction())
+                    val created = service.create(idempotencyKey, body.request.toNewCardTransaction())
                     call.respond(HttpStatusCode.Created, created.toDto())
                 }
                 is CreateCardTransactionsBody.Many -> {
                     // Wire-to-domain failures name the item, as the service's own rules do.
                     val items = body.requests.mapIndexed { index, request -> atItemIndex(index) { request.toNewCardTransaction() } }
-                    val created = service.createAll(items)
+                    val created = service.createAll(idempotencyKey, items)
                     call.respond(HttpStatusCode.Created, CardTransactionListResponse(created.map { it.toDto() }))
                 }
             }
