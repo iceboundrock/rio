@@ -15,6 +15,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.alibaba.fastjson2.JSON
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -40,6 +41,7 @@ import io.ktor.server.testing.testApplication
 import java.net.Socket
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -73,11 +75,15 @@ class CardTransactionRoutesTest {
         block()
     }
 
-    private suspend fun ApplicationTestBuilder.postJson(body: String): HttpResponse =
+    /** Every POST needs an Idempotency-Key; a fresh UUID per call keeps unrelated tests from replaying each other. */
+    private suspend fun ApplicationTestBuilder.postJson(body: String, idempotencyKey: String? = UUID.randomUUID().toString()): HttpResponse =
         client.post("/api/card-transactions") {
             contentType(ContentType.Application.Json)
+            if (idempotencyKey != null) header("Idempotency-Key", idempotencyKey)
             setBody(body)
         }
+
+    private fun idempotencyKeyLine() = "Idempotency-Key: ${UUID.randomUUID()}"
 
     private val validRequest = """{"description":"Lunch","amount":{"amount":"1800","currency":"USD"},"type":"DEBIT"}"""
 
@@ -134,7 +140,7 @@ class CardTransactionRoutesTest {
             Triple("application/json;charset=", 201, null),
         )
         for ((type, status, message) in cases) {
-            val headers = listOfNotNull(type?.let { "Content-Type: $it" })
+            val headers = listOfNotNull(type?.let { "Content-Type: $it" }, idempotencyKeyLine())
             val response = rawRequest(port, "POST /api/card-transactions", headers, validRequest)
             assertEquals(status, response.status, "Content-Type: $type; ${response.raw}")
             assertTrue(response.hasHeader("Accept-Post: application/json"))
@@ -168,7 +174,7 @@ class CardTransactionRoutesTest {
             val countBefore = repository.findAll().size
             for ((target, type, normalStatus) in cases) {
                 val body = if (normalStatus == 201) validRequest else ""
-                val headers = listOfNotNull("Accept: $accept", type?.let { "Content-Type: $it" })
+                val headers = listOfNotNull("Accept: $accept", type?.let { "Content-Type: $it" }, idempotencyKeyLine().takeIf { target.startsWith("POST") })
                 val response = rawRequest(port, target, headers, body)
                 val expectedStatus = when {
                     accept.startsWith("**") -> 400
@@ -303,7 +309,7 @@ class CardTransactionRoutesTest {
                 val response = rawRequest(
                     port,
                     target,
-                    if (post) headers + "Content-Type: application/json" else headers,
+                    if (post) headers + "Content-Type: application/json" + idempotencyKeyLine() else headers,
                     if (post) validRequest else "",
                 )
                 val context = "Accept: $accept; $target; ${response.raw}"
@@ -375,7 +381,7 @@ class CardTransactionRoutesTest {
         configureErrorHandling()
         routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
     }) { port ->
-        val malformed = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: not a mime type"), validRequest)
+        val malformed = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: not a mime type", idempotencyKeyLine()), validRequest)
         assertEquals(400, malformed.status, malformed.raw)
         assertTrue(malformed.hasHeader("Content-Type: application/json"), malformed.raw)
         assertMatchesSchema(malformed.body, "api-error.schema.json")
@@ -383,7 +389,7 @@ class CardTransactionRoutesTest {
         assertTrue(!malformed.body.contains("not a mime type"), malformed.body)
 
         // The genuine misconfiguration this handler exists for still reports a server fault.
-        val declared = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: application/json"), validRequest)
+        val declared = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: application/json", idempotencyKeyLine()), validRequest)
         assertEquals(500, declared.status, declared.raw)
         assertMatchesSchema(declared.body, "api-error.schema.json")
     }
@@ -399,6 +405,7 @@ class CardTransactionRoutesTest {
         try {
             for (type in listOf(null, ContentType.Text.Plain, ContentType.parse("application/vnd.api+json"))) {
                 val response = client.post("/api/card-transactions") {
+                    header("Idempotency-Key", UUID.randomUUID().toString())
                     setBody(object : OutgoingContent.ByteArrayContent() {
                         override val contentType: ContentType? = type
                         override fun bytes(): ByteArray = validRequest.toByteArray()
@@ -501,6 +508,7 @@ class CardTransactionRoutesTest {
         }
         for (type in listOf(null, ContentType.Application.OctetStream, ContentType.Text.Plain, ContentType.Application.FormUrlEncoded, ContentType.parse("application/vnd.api+json"))) {
             val response = client.post("/api/card-transactions") {
+                header("Idempotency-Key", UUID.randomUUID().toString())
                 setBody(object : OutgoingContent.ByteArrayContent() {
                     override val contentType: ContentType? = type
                     override fun bytes(): ByteArray = validRequest.toByteArray()
@@ -925,5 +933,190 @@ class CardTransactionRoutesTest {
         for (body in listOf("true", "\"x\"", "42", "null")) {
             assertBadRequestArray(body, "malformed request body")
         }
+    }
+
+    // ---- Idempotency-Key ----
+
+    private suspend fun ApplicationTestBuilder.assertKeyRejected(response: HttpResponse, message: String, before: List<String>) {
+        assertEquals(HttpStatusCode.BadRequest, response.status, response.bodyAsText())
+        val text = response.bodyAsText()
+        assertMatchesSchema(text, "api-error.schema.json")
+        assertEquals("VALIDATION_ERROR", JSON.parseObject(text).getString("code"))
+        assertEquals(message, JSON.parseObject(text).getString("message"))
+        assertEquals(before, listIds(), "a rejected key must not persist anything")
+    }
+
+    @Test
+    fun `POST without Idempotency-Key is 400 and persists nothing`() = withApp {
+        val before = listIds()
+        assertKeyRejected(postJson(validRequest, idempotencyKey = null), "missing Idempotency-Key header", before)
+        assertKeyRejected(postJson("[$validRequest]", idempotencyKey = null), "missing Idempotency-Key header", before)
+    }
+
+    @Test
+    fun `the header is checked before the body`() = withApp {
+        assertKeyRejected(postJson("{not json", idempotencyKey = null), "missing Idempotency-Key header", listIds())
+    }
+
+    @Test
+    fun `over-long Idempotency-Key is 400 and the maximum length is accepted`() = withApp {
+        val before = listIds()
+        assertKeyRejected(postJson(validRequest, idempotencyKey = "x".repeat(256)), "invalid Idempotency-Key header", before)
+        assertEquals(HttpStatusCode.Created, postJson(validRequest, idempotencyKey = "x".repeat(255)).status)
+        // Opaque: a comma does not make the value a list, spaces inside are fine, and case matters.
+        assertEquals(HttpStatusCode.Created, postJson(validRequest, idempotencyKey = "a, b").status)
+        assertEquals(HttpStatusCode.Created, postJson(validRequest, idempotencyKey = "Key").status)
+        assertEquals(HttpStatusCode.Created, postJson(validRequest, idempotencyKey = "key").status)
+        assertEquals(before.size + 4, listIds().size)
+    }
+
+    /**
+     * Values the Ktor client refuses to send: blank lines, control characters, and a repeated field
+     * line. Whitespace around a field value is not part of it (RFC 9110 5.5), so a blank line arrives
+     * as an empty key. Netty rejects a control character in any header value before Ktor sees the
+     * request, with its own plain-text 400; the route's own check is what a less strict engine would
+     * hit, so those cases assert the status and the absent side effect only.
+     */
+    @Test
+    fun `raw blank, control-character and repeated Idempotency-Key headers are 400`() = withRawServer { port ->
+        val repository = CardTransactionRepository(Database.open(dbFile))
+        val cases = listOf(
+            listOf("Idempotency-Key:") to "invalid Idempotency-Key header",
+            listOf("Idempotency-Key: ") to "invalid Idempotency-Key header",
+            listOf("Idempotency-Key:   \t  ") to "invalid Idempotency-Key header",
+            listOf("Idempotency-Key: a\u007Fb") to null,
+            listOf("Idempotency-Key: a\u0001b") to null,
+            listOf("Idempotency-Key: one", "Idempotency-Key: two") to "multiple Idempotency-Key headers",
+            listOf("Idempotency-Key: same", "Idempotency-Key: same") to "multiple Idempotency-Key headers",
+        )
+        for ((lines, message) in cases) {
+            val before = repository.findAll().size
+            val response = rawRequest(port, "POST /api/card-transactions", lines + "Content-Type: application/json", validRequest)
+            assertEquals(400, response.status, "$lines: ${response.raw}")
+            if (message != null) {
+                assertMatchesSchema(response.body, "api-error.schema.json")
+                assertEquals("VALIDATION_ERROR", JSON.parseObject(response.body).getString("code"))
+                assertEquals(message, response.message(), "$lines")
+            }
+            assertEquals(before, repository.findAll().size, "$lines must not persist anything")
+        }
+    }
+
+    @Test
+    fun `replaying a single create returns the identical body and no new row`() = withApp {
+        val key = UUID.randomUUID().toString()
+        val before = listIds()
+        val first = postJson(validRequest, key)
+        assertEquals(HttpStatusCode.Created, first.status)
+
+        val replay = postJson(validRequest, key)
+
+        assertEquals(HttpStatusCode.Created, replay.status)
+        assertEquals(first.bodyAsText(), replay.bodyAsText())
+        assertMatchesSchema(replay.bodyAsText(), "card-transaction.schema.json")
+        assertEquals(before.size + 1, listIds().size)
+    }
+
+    @Test
+    fun `replaying a batch returns the same ids in order and no new rows`() = withApp {
+        val key = UUID.randomUUID().toString()
+        val before = listIds()
+        val first = postJson("[$validRequest,$secondRequest]", key)
+        assertEquals(HttpStatusCode.Created, first.status)
+
+        val replay = postJson("[$validRequest,$secondRequest]", key)
+
+        assertEquals(HttpStatusCode.Created, replay.status)
+        assertEquals(first.bodyAsText(), replay.bodyAsText())
+        assertMatchesSchema(replay.bodyAsText(), "card-transaction-list-response.schema.json")
+        assertEquals(before.size + 2, listIds().size)
+    }
+
+    private suspend fun ApplicationTestBuilder.assertConflict(response: HttpResponse, before: List<String>) {
+        assertEquals(HttpStatusCode.UnprocessableEntity, response.status, response.bodyAsText())
+        assertTrue(response.headers.getAll(HttpHeaders.Vary)!!.contains(HttpHeaders.Accept))
+        val text = response.bodyAsText()
+        assertMatchesSchema(text, "api-error.schema.json")
+        assertEquals("IDEMPOTENCY_CONFLICT", JSON.parseObject(text).getString("code"))
+        assertEquals("Idempotency-Key was already used with a different request", JSON.parseObject(text).getString("message"))
+        assertEquals(before, listIds(), "a conflict must not persist anything")
+    }
+
+    @Test
+    fun `same key with a different body is 422 and writes nothing`() = withApp {
+        val key = UUID.randomUUID().toString()
+        assertEquals(HttpStatusCode.Created, postJson(validRequest, key).status)
+        val before = listIds()
+
+        assertConflict(postJson(validRequest.replace("1800", "1801"), key), before)
+        assertConflict(postJson(validRequest.replace("USD", "EUR"), key), before)
+        assertConflict(postJson(validRequest.replace("DEBIT", "CREDIT"), key), before)
+        assertConflict(postJson(validRequest.replace("Lunch", "Dinner"), key), before)
+        assertConflict(postJson("[$validRequest,$secondRequest]", key), before)
+    }
+
+    @Test
+    fun `an object and a one-element array are different request shapes`() = withApp {
+        val key = UUID.randomUUID().toString()
+        assertEquals(HttpStatusCode.Created, postJson(validRequest, key).status)
+        assertConflict(postJson("[$validRequest]", key), listIds())
+
+        val arrayKey = UUID.randomUUID().toString()
+        assertEquals(HttpStatusCode.Created, postJson("[$validRequest]", arrayKey).status)
+        assertConflict(postJson(validRequest, arrayKey), listIds())
+    }
+
+    @Test
+    fun `JSON whitespace and member order do not change the logical request`() = withApp {
+        val key = UUID.randomUUID().toString()
+        val first = postJson(validRequest, key)
+        assertEquals(HttpStatusCode.Created, first.status)
+        val before = listIds()
+
+        val reordered = """
+            {
+              "type": "DEBIT",
+              "description": "Lunch",
+              "amount": { "currency": "USD", "amount": "1800" }
+            }
+        """.trimIndent()
+        val replay = postJson(reordered, key)
+
+        assertEquals(HttpStatusCode.Created, replay.status)
+        assertEquals(first.bodyAsText(), replay.bodyAsText())
+        assertEquals(before, listIds())
+        // Trimming is part of validation, so a padded description is the same logical request too.
+        assertEquals(first.bodyAsText(), postJson(validRequest.replace("Lunch", "  Lunch  "), key).bodyAsText())
+    }
+
+    @Test
+    fun `identical bodies with different keys create distinct rows`() = withApp {
+        val before = listIds()
+        val first = JSON.parseObject(postJson(validRequest).bodyAsText())
+        val second = JSON.parseObject(postJson(validRequest).bodyAsText())
+
+        assertTrue(first.getString("id") != second.getString("id"))
+        assertEquals(before.size + 2, listIds().size)
+    }
+
+    @Test
+    fun `a rejected request does not consume the key`() = withApp {
+        val key = UUID.randomUUID().toString()
+        assertEquals(HttpStatusCode.BadRequest, postJson(validRequest.replace("1800", "0"), key).status)
+        assertEquals(HttpStatusCode.BadRequest, postJson("{not json", key).status)
+        assertEquals(HttpStatusCode.BadRequest, postJson("[$validRequest,${secondRequest.replace("Ramen", " ")}]", key).status)
+        val noContentType = client.post("/api/card-transactions") {
+            header("Idempotency-Key", key)
+            setBody(object : OutgoingContent.ByteArrayContent() {
+                override val contentType: ContentType? = null
+                override fun bytes(): ByteArray = validRequest.toByteArray()
+            })
+        }
+        assertEquals(HttpStatusCode.UnsupportedMediaType, noContentType.status)
+
+        val created = postJson(validRequest, key)
+
+        assertEquals(HttpStatusCode.Created, created.status, created.bodyAsText())
+        assertEquals(created.bodyAsText(), postJson(validRequest, key).bodyAsText())
     }
 }
