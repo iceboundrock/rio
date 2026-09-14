@@ -67,6 +67,7 @@ class SchemaInitializerTest {
 
         assertTrue(error.message!!.contains("card_transaction_idempotency"))
         assertTrue(error.message!!.contains("card_transaction_idempotency_items"))
+        assertTrue(error.message!!.contains(dbFile.toAbsolutePath().toString()))
         assertTrue(error.message!!.contains("RIO_DB_PATH"))
         assertTrue(error.message!!.contains("restart"))
         assertEquals(listOf("card_transactions"), tableNames())

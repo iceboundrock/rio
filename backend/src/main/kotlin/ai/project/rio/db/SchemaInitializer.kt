@@ -59,7 +59,8 @@ object SchemaInitializer {
 
     /** Names the exact file to delete: the default is relative to the working directory, and RIO_DB_PATH overrides it. */
     private fun resetInstructions(dbPath: Path): String =
-        "Stop the backend and delete ${dbPath.toAbsolutePath()} (the file configured by RIO_DB_PATH, default data/rio.db), " +
+        "Stop the backend and delete ${dbPath.toAbsolutePath()} (RIO_DB_PATH if set, otherwise data/rio.db relative to " +
+            "the directory the backend was started from), " +
             "then restart. This resets local card transactions to demo data; back up data you need first."
 
     fun initialize(jdbc: JdbcTemplate, dbPath: Path) {
