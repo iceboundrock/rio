@@ -75,7 +75,10 @@ a retry replay the committed result instead of writing again.
 - `postJson` accepts optional request headers; card-transaction functions set `Idempotency-Key`.
 - `createCardTransaction(input, idempotencyKey)` / `createCardTransactions(inputs, idempotencyKey)`
   take the key explicitly so a retry of the same operation can reuse it.
-- `CreateCardTransactionsForm` generates one `crypto.randomUUID()` per submission. No automatic
+- `CreateCardTransactionsForm` generates one `crypto.randomUUID()` per logical submission and keeps
+  it with the validated inputs until the create succeeds: a resubmit whose validated inputs are
+  unchanged (the same identity the server fingerprints) reuses the key, so a commit whose response
+  was lost replays instead of creating again; a changed request gets a fresh key. No automatic
   transport retries are added.
 - `ApiErrorJson.code` includes `IDEMPOTENCY_CONFLICT`.
 
@@ -104,7 +107,7 @@ a retry replay the committed result instead of writing again.
 - [x] Parallel same-key/same-payload → one logical creation, all successes identical.
 - [x] Parallel same-key/different-payload → only the winner persisted, losers 422.
 - [x] All real HTTP responses still validate against `contracts/schemas`.
-- [x] Frontend sends a fresh key per submission and maps 422 to `ApiError` with code `IDEMPOTENCY_CONFLICT`.
+- [x] Frontend sends a fresh key per logical submission, reuses it when the user resubmits the same request after an error, and maps 422 to `ApiError` with code `IDEMPOTENCY_CONFLICT`.
 - [x] README, this spec and the scoped `AGENTS.md` files describe the contract.
 - [x] `./verify.sh` passes.
 

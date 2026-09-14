@@ -133,7 +133,7 @@ position, followed by the single-object message: `[1]: amount must be positive`.
 (`true`, `"x"`, `42`, `null`) is `malformed request body`.
 
 POST requires exactly one `Idempotency-Key` header: an opaque, case-sensitive value of 1 to 255 characters
-with no control characters and not blank (a UUID per submission is the recommended client value). It is
+with no control characters and not blank (a UUID per logical submission, reused when the client retries that same request, is the recommended client value). It is
 checked before the body: a missing header is 400 `missing Idempotency-Key header`, a blank, over-long or
 control-character value is 400 `invalid Idempotency-Key header`, two field lines are 400
 `multiple Idempotency-Key headers`, and none of these consume the key. One caveat: the HTTP engine (Netty)

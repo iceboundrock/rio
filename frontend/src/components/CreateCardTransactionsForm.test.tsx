@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CreateCardTransactionsFormView, emptyRow, validateRows, type FormRow } from "./CreateCardTransactionsForm";
+import { createCardTransactions } from "../api/cardTransactions";
+import { CreateCardTransactionsFormView, emptyRow, submissionFor, validateRows, type FormRow, type Submission } from "./CreateCardTransactionsForm";
 
 const lunch: FormRow = { description: "Lunch", amount: "18.00", currency: "USD", type: "DEBIT" };
 const ramen: FormRow = { description: "Ramen", amount: "1200", currency: "JPY", type: "CREDIT" };
@@ -74,5 +75,56 @@ describe("validateRows", () => {
 
   it("starts with an empty USD debit row", () => {
     expect(emptyRow()).toEqual({ description: "", amount: "", currency: "USD", type: "DEBIT" });
+  });
+});
+
+describe("submissionFor", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const inputsOf = (rows: FormRow[]) => validateRows(rows).inputs!;
+
+  it("mints a key for the first attempt and reuses it while the validated request is unchanged", () => {
+    const first = submissionFor(null, inputsOf([lunch, ramen]));
+    expect(first.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    // Same logical request, even if the draft was retyped with only cosmetic differences.
+    const retry = submissionFor(first, inputsOf([{ ...lunch, description: " Lunch ", amount: "18.0" }, ramen]));
+    expect(retry.idempotencyKey).toBe(first.idempotencyKey);
+  });
+
+  it("mints a new key when the request differs in any field, order or length", () => {
+    const first = submissionFor(null, inputsOf([lunch, ramen]));
+    const variants: FormRow[][] = [
+      [{ ...lunch, description: "Dinner" }, ramen],
+      [{ ...lunch, amount: "18.01" }, ramen],
+      [{ ...lunch, currency: "EUR" }, ramen],
+      [{ ...lunch, type: "CREDIT" }, ramen],
+      [ramen, lunch],
+      [lunch],
+      [lunch, ramen, lunch],
+    ];
+    for (const rows of variants) {
+      expect(submissionFor(first, inputsOf(rows)).idempotencyKey).not.toBe(first.idempotencyKey);
+    }
+  });
+
+  it("retries an unchanged draft with the same Idempotency-Key so a lost response replays instead of creating twice", async () => {
+    const created = { id: "tx-1", description: "Lunch", amount: { amount: "1800", currency: "USD" }, type: "DEBIT", status: "COMPLETED", createdAt: "2026-09-02T15:30:00Z" };
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch")) // the server may have committed; the response never arrived
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [created] }), { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+
+    let pending: Submission | null = submissionFor(null, inputsOf([lunch]));
+    await expect(createCardTransactions(pending.inputs, pending.idempotencyKey)).rejects.toBeInstanceOf(TypeError);
+
+    // The user clicks Create again with the draft untouched.
+    pending = submissionFor(pending, inputsOf([lunch]));
+    const result = await createCardTransactions(pending.inputs, pending.idempotencyKey);
+
+    expect(result.map((r) => r.id)).toEqual(["tx-1"]);
+    const keys = fetch.mock.calls.map(([, init]) => (init.headers as Record<string, string>)["Idempotency-Key"]);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
   });
 });
