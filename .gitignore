@@ -19,4 +19,4 @@ frontend/dist/
 build/
 
 # Local server state
-.start.pids
+/.start.pids

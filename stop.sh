@@ -1,5 +1,6 @@
 #!/bin/sh
-# Stops the backend and frontend launched by ./start.sh.
+# Stops the backend and frontend launched by ./start.sh by asking that run to shut down;
+# its trap kills both servers (up to ~5s grace, then SIGKILL) and removes the pid file.
 set -eu
 
 cd "$(dirname "$0")"
@@ -10,39 +11,28 @@ if [ ! -f "$PID_FILE" ]; then
   exit 0
 fi
 
-backend_pid=
-frontend_pid=
-{
-  IFS= read -r backend_pid || true
-  IFS= read -r frontend_pid || true
-} < "$PID_FILE"
+pid=
+IFS= read -r pid < "$PID_FILE" || true
 
-# A pid plus all of its descendants (npm -> sh -> vite). The backend's java is a child
-# of the Gradle daemon, not of gradlew; the daemon kills it when the gradlew client dies.
-tree() {
-  for c in $(pgrep -P "$1" 2>/dev/null); do tree "$c"; done
-  echo "$1"
+# True when $1 is the pid of a running start.sh. The pid file can outlive a crashed run and
+# the OS may hand its pid to something else, so check the command line, not just liveness.
+is_start_sh() {
+  case "$1" in ''|0|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  case "$(ps -o args= -p "$1" 2>/dev/null)" in */start.sh|*" start.sh") return 0 ;; *) return 1 ;; esac
 }
 
-pids=
-for pid in "$backend_pid" "$frontend_pid"; do
-  case "$pid" in
-    ''|*[!0-9]*) ;;
-    *) pids="$pids $(tree "$pid")" ;;
-  esac
-done
-rm -f "$PID_FILE"
-
-if [ -z "$pids" ]; then
-  echo "==> no running servers found"
+if ! is_start_sh "$pid"; then
+  rm -f "$PID_FILE"
+  echo "==> stale .start.pids (./start.sh${pid:+ pid $pid} is not running); removed"
   exit 0
 fi
 
-echo "==> stopping"
-kill $pids 2>/dev/null || true
-# Vite's graceful shutdown sometimes hangs; give everything a moment, then force it.
-for _ in 1 2 3 4 5; do
-  kill -0 $pids 2>/dev/null || break
+echo "==> stopping ./start.sh (pid $pid)"
+kill -TERM "$pid"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 "$pid" 2>/dev/null || { echo "==> stopped"; exit 0; }
   sleep 1
 done
-kill -KILL $pids 2>/dev/null || true
+echo "==> ./start.sh (pid $pid) is still running after 10s" >&2
+exit 1
