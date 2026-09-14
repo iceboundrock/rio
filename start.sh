@@ -55,6 +55,7 @@ stop() {
   trap - INT TERM EXIT
   echo
   echo "==> stopping"
+  # Newline-separated; expanded unquoted below on purpose so each pid is its own argument.
   pids=$(tree "$BACKEND_PID"; tree "$FRONTEND_PID")
   rm -f "$PID_FILE" "$PID_FILE_TMP"
   kill $pids 2>/dev/null || true
