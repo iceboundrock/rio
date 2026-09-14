@@ -23,8 +23,9 @@ fi
 
 # --disallow-code-generation-from-strings makes Node throw on eval / new Function, so a validator
 # that quietly went back to runtime compilation fails here instead of in a browser with a strict CSP.
+# --ignore-scripts skips the pretest hook: the generator itself needs new Function and already ran above.
 echo "==> frontend: npm test -- --run (eval disabled)"
-(cd frontend && NODE_OPTIONS=--disallow-code-generation-from-strings npm test -- --run)
+(cd frontend && NODE_OPTIONS=--disallow-code-generation-from-strings npm test --ignore-scripts -- --run)
 
 echo "==> frontend: npm run build"
 (cd frontend && npm run build)
