@@ -16,7 +16,7 @@ Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`.
 - HTTP translation belongs in routes and `http/ErrorHandling.kt`. Throw `ValidationException` (400) or `NotFoundException` (404).
 - Do not create generic repository hierarchies or interfaces with a single implementation.
 - Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and reset the database file. That file is `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the backend was started from (`backend/data/rio.db` with the README's `cd backend && ./gradlew run`).
-- Keep the startup schema-drift guard in `SchemaInitializer.initialize`: it compares the stored DDL with the current definition and refuses to start with reset instructions, and `SchemaInitializerTest` covers it. Do not add code that migrates an old database or keeps serving it; a mismatch is always a reset.
+- Keep the startup schema-drift guard in `SchemaInitializer.initialize`: tables are created only for a fresh file (none of the expected tables present); otherwise every expected table must exist and its stored DDL must match the current definition, or startup refuses with reset instructions before running any DDL. `SchemaInitializerTest` covers it. Do not add code that migrates an old database, completes a file that has only some of the tables, or keeps serving it; a mismatch is always a reset.
 
 ## Money
 
@@ -53,17 +53,18 @@ currency or do not offer it.
 
 ## Idempotency
 
-The API has no idempotency mechanism today, and adding one to an endpoint that does not need it is out of scope. When a task adds a server-side operation that may be retried and has a financial or otherwise non-repeatable side effect (a charge, a refund, a transfer, a webhook or event consumer, a retryable mutation endpoint), design its idempotency explicitly:
+`POST /api/card-transactions` is idempotent through a required `Idempotency-Key` header (spec: `features/idempotent-card-transaction-create.md`). The pieces: the route reads and validates the header before the body; `CardTransactionService` validates and normalizes every item, computes `CardTransactionRequestFingerprint` from the domain values, and inside `transactional {}` claims the key as the *first* statement (`CardTransactionIdempotencyRepository.claim`, an `INSERT ... ON CONFLICT DO NOTHING`), then inserts the rows and the ordered id mapping, or replays from the stored ids, or throws `IdempotencyConflictException` (422). Adding idempotency to an endpoint that does not need it is out of scope. When a task adds another server-side operation that may be retried and has a financial or otherwise non-repeatable side effect (a charge, a refund, a transfer, a webhook or event consumer, a retryable mutation endpoint), follow the same design:
 
-- Persist the idempotency key together with enough of the request (for example a hash of the body) to detect the same key being reused for a different request, and reject that reuse.
-- Enforce key uniqueness in the database with a `UNIQUE` constraint, inserted inside the same transaction as the side effect, so two concurrent requests with the same key cannot both execute.
-- A replay of the same logical request returns the stored result and performs no new side effect.
-- Define retention and cleanup for stored keys when the table is introduced, in the DDL and in the spec.
+- Persist the idempotency key together with a fingerprint of the validated request, computed from domain values (never from the JSON text, field iteration order or `hashCode()`), to detect the same key being reused for a different request, and reject that reuse.
+- Enforce key uniqueness in the database with a `PRIMARY KEY` or `UNIQUE` constraint claimed inside the same transaction as the side effect, as its first statement: SQLite lets a transaction that has only read fail with `SQLITE_BUSY` on its first write instead of waiting, and a `SELECT` followed by an `INSERT` lets two requests both observe absence.
+- A replay of the same logical request returns the stored result and performs no new side effect. Reconstructing the result from stored ids is only correct while the resource is immutable; a mutable resource needs a stored response snapshot.
+- Requests rejected before the transaction must not consume the key; a rollback must release it; a commit consumes it even if the response is lost.
+- Define retention and cleanup for stored keys when the table is introduced, in the DDL and in the spec. The card-transaction keys deliberately never expire.
 - If an external provider supports idempotency, pass the key through and store the provider's identifier alongside the local record.
 
 ## Tests
 
 - Tests run with `./gradlew test` from `backend/` and use real components: `Database.open` on a temporary SQLite file for repositories and services, and `testApplication` for routes.
 - Route tests must validate real HTTP responses with `JsonSchemaAssertions` (`assertMatchesSchema` / `assertViolatesSchema`) against the files in `contracts/schemas/`.
-- A change to a financial invariant needs automated coverage for the cases that apply: precision and rounding per currency, mixed currencies, zero, negative and boundary amounts, `Long` overflow, transaction rollback, concurrent execution, and duplicate or retried requests. Behaviour that depends on transaction semantics is tested through the database, not with mocks.
+- A change to a financial invariant needs automated coverage for the cases that apply: precision and rounding per currency, mixed currencies, zero, negative and boundary amounts, `Long` overflow, transaction rollback, concurrent execution, and duplicate or retried requests. Behaviour that depends on transaction semantics is tested through the database, not with mocks: `CardTransactionServiceTest` forces a mid-transaction failure with a SQLite trigger and races real threads on one file.
 - Financially significant operations stay traceable. If a task adds audit logging, log a structured record with the actor, the operation, amount and currency, the transaction or correlation identifier, the idempotency key if any, and the outcome; never log secrets or full card data.

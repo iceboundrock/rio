@@ -8,11 +8,15 @@ import ai.project.rio.cardtransaction.CardTransactionStatus
 import ai.project.rio.cardtransaction.CardTransactionType
 import java.time.Instant
 
-/** Creates tables on startup. There is no migration tool; edit the DDL and delete the DB file. */
+/**
+ * Creates the tables on a fresh database and refuses to serve any other file whose stored DDL does not
+ * match. There is no migration tool: a file that predates a table is not completed, it is reset (edit
+ * the DDL and delete the DB file).
+ */
 object SchemaInitializer {
 
     private val CREATE_CARD_TRANSACTIONS = """
-        CREATE TABLE IF NOT EXISTS card_transactions (
+        CREATE TABLE card_transactions (
             id TEXT PRIMARY KEY,
             description TEXT NOT NULL CHECK (length(trim(description)) > 0),
             amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
@@ -23,18 +27,64 @@ object SchemaInitializer {
         )
     """.trimIndent()
 
+    // One row per Idempotency-Key ever committed for POST /api/card-transactions. The primary key is
+    // what decides ownership of a key between concurrent requests (CardTransactionService). Keys never
+    // expire: they live as long as this database file.
+    private val CREATE_CARD_TRANSACTION_IDEMPOTENCY = """
+        CREATE TABLE card_transaction_idempotency (
+            idempotency_key TEXT PRIMARY KEY,
+            request_fingerprint TEXT NOT NULL,
+            request_shape TEXT NOT NULL CHECK (request_shape IN ('ONE', 'MANY')),
+            created_at TEXT NOT NULL
+        )
+    """.trimIndent()
+
+    // The ordered card transactions a key created, so a replay can rebuild the original response.
+    private val CREATE_CARD_TRANSACTION_IDEMPOTENCY_ITEMS = """
+        CREATE TABLE card_transaction_idempotency_items (
+            idempotency_key TEXT NOT NULL REFERENCES card_transaction_idempotency(idempotency_key) ON DELETE CASCADE,
+            item_index INTEGER NOT NULL CHECK (item_index >= 0),
+            card_transaction_id TEXT NOT NULL REFERENCES card_transactions(id),
+            PRIMARY KEY (idempotency_key, item_index)
+        )
+    """.trimIndent()
+
+    /** Creation order matters: the item table references both others. */
+    private val TABLES = listOf(
+        "card_transactions" to CREATE_CARD_TRANSACTIONS,
+        "card_transaction_idempotency" to CREATE_CARD_TRANSACTION_IDEMPOTENCY,
+        "card_transaction_idempotency_items" to CREATE_CARD_TRANSACTION_IDEMPOTENCY_ITEMS,
+    )
+
+    private const val RESET_INSTRUCTIONS =
+        "Stop the backend and delete backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
+            "This resets local card transactions to demo data; back up data you need first."
+
     fun initialize(jdbc: JdbcTemplate) {
-        jdbc.update(CREATE_CARD_TRANSACTIONS)
-        val actual = jdbc.queryOne(
-            "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
-            listOf("table", "card_transactions"),
-        ) { it.getString("sql") }
-        check(actual != null && canonicalDdl(actual) == canonicalDdl(CREATE_CARD_TRANSACTIONS)) {
-            "Stored card_transactions schema does not match the current definition. Stop the backend and delete " +
-                "backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
-                "This resets local card transactions to demo data; back up data you need first."
+        // Decide fresh vs existing before running any DDL: creating a missing table in a file that already
+        // has the others would be a silent migration of a pre-existing database.
+        if (storedDefinitions(jdbc).isEmpty()) {
+            jdbc.withTransaction { tx -> TABLES.forEach { (_, ddl) -> tx.execute(ddl) } }
+        }
+        val stored = storedDefinitions(jdbc)
+        val missing = TABLES.map { it.first }.filter { it !in stored }
+        check(missing.isEmpty()) {
+            "Database is missing table(s) ${missing.joinToString()}: it predates the current schema and is " +
+                "not migrated. $RESET_INSTRUCTIONS"
+        }
+        for ((table, ddl) in TABLES) {
+            val actual = stored.getValue(table)
+            check(actual != null && canonicalDdl(actual) == canonicalDdl(ddl)) {
+                "Stored $table schema does not match the current definition. $RESET_INSTRUCTIONS"
+            }
         }
     }
+
+    /** Expected names present in sqlite_master, mapped to their DDL, or null when the name is not a table. */
+    private fun storedDefinitions(jdbc: JdbcTemplate): Map<String, String?> = jdbc.query(
+        "SELECT name, type, sql FROM sqlite_master WHERE name IN (${TABLES.joinToString { "?" }})",
+        TABLES.map { it.first },
+    ) { row -> row.getString("name") to row.getString("sql").takeIf { row.getString("type") == "table" } }.toMap()
 
     // Normalize SQLite's CREATE prefix and statement terminator only. Preserve the body exactly,
     // especially quoted literals: this is a reset-only drift guard, not SQL semantic equivalence.

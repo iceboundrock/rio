@@ -34,7 +34,7 @@ export interface CreateCardTransactionRequestJson {
 export type CreateCardTransactionsRequestJson = CreateCardTransactionRequestJson | CreateCardTransactionRequestJson[];
 
 export interface ApiErrorJson {
-  code: "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR";
+  code: "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR" | "IDEMPOTENCY_CONFLICT";
   message: string;
 }
 

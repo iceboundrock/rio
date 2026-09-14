@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["code", "message"],
   "properties": {
-    "code": { "type": "string", "enum": ["VALIDATION_ERROR", "NOT_FOUND", "INTERNAL_ERROR"] },
+    "code": { "type": "string", "enum": ["VALIDATION_ERROR", "NOT_FOUND", "INTERNAL_ERROR", "IDEMPOTENCY_CONFLICT"] },
     "message": { "type": "string" }
   }
 }

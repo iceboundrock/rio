@@ -25,10 +25,64 @@ class SchemaInitializerTest {
         Files.deleteIfExists(dbFile)
     }
 
-    private fun storedDdl(): String = jdbc.queryForObject(
+    private fun tableNames(): List<String> =
+        jdbc.query("SELECT name FROM sqlite_master WHERE type = ? ORDER BY name", listOf("table")) { it.getString("name") }
+
+    private fun storedDdl(table: String = "card_transactions"): String = jdbc.queryForObject(
         "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
-        listOf("table", "card_transactions"),
+        listOf("table", table),
     ) { it.getString("sql") }
+
+    @Test
+    fun `fresh schema creates the idempotency tables`() {
+        SchemaInitializer.initialize(jdbc)
+
+        assertEquals(listOf("card_transaction_idempotency", "card_transaction_idempotency_items", "card_transactions"), tableNames())
+    }
+
+    @Test
+    fun `drift in an idempotency table fails at startup and names the table`() {
+        SchemaInitializer.initialize(jdbc)
+        val changedDdl = storedDdl("card_transaction_idempotency").replace("created_at TEXT NOT NULL", "created_at TEXT NOT NULL, extra TEXT")
+        jdbc.execute("DROP TABLE card_transaction_idempotency_items")
+        jdbc.execute("DROP TABLE card_transaction_idempotency")
+        jdbc.execute(changedDdl)
+
+        val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }
+
+        assertTrue(error.message!!.contains("card_transaction_idempotency"))
+        assertTrue(error.message!!.contains("RIO_DB_PATH"))
+        assertEquals(changedDdl, storedDdl("card_transaction_idempotency"))
+    }
+
+    @Test
+    fun `database that predates the idempotency tables fails at startup without creating them`() {
+        SchemaInitializer.initialize(jdbc)
+        jdbc.execute("DROP TABLE card_transaction_idempotency_items")
+        jdbc.execute("DROP TABLE card_transaction_idempotency")
+        CardTransactionRepository(jdbc).insert(SchemaInitializer.SEED.first())
+        val before = CardTransactionRepository(jdbc).findAll()
+
+        val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(Database.open(dbFile)) }
+
+        assertTrue(error.message!!.contains("card_transaction_idempotency"))
+        assertTrue(error.message!!.contains("card_transaction_idempotency_items"))
+        assertTrue(error.message!!.contains("RIO_DB_PATH"))
+        assertTrue(error.message!!.contains("restart"))
+        assertEquals(listOf("card_transactions"), tableNames())
+        assertEquals(before, CardTransactionRepository(jdbc).findAll())
+    }
+
+    @Test
+    fun `database missing only the items table is rejected, not completed`() {
+        SchemaInitializer.initialize(jdbc)
+        jdbc.execute("DROP TABLE card_transaction_idempotency_items")
+
+        val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }
+
+        assertTrue(error.message!!.contains("card_transaction_idempotency_items"))
+        assertEquals(listOf("card_transaction_idempotency", "card_transactions"), tableNames())
+    }
 
     @Test
     fun `fresh schema can be reopened without losing card transactions`() {

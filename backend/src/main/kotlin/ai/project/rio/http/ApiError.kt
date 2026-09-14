@@ -6,6 +6,7 @@ data class ApiError(val code: String, val message: String) {
         const val VALIDATION_ERROR = "VALIDATION_ERROR"
         const val NOT_FOUND = "NOT_FOUND"
         const val INTERNAL_ERROR = "INTERNAL_ERROR"
+        const val IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
     }
 }
 
@@ -26,6 +27,9 @@ inline fun <T> atItemIndex(index: Int, block: () -> T): T =
 
 /** No representation the request accepts can carry the response -> HTTP 406. */
 class NotAcceptableException(message: String) : RuntimeException(message)
+
+/** Idempotency-Key reused for a different logical request -> HTTP 422. */
+class IdempotencyConflictException(message: String) : RuntimeException(message)
 
 /** Referenced resource does not exist -> HTTP 404. */
 class NotFoundException(message: String) : RuntimeException(message)

@@ -24,10 +24,10 @@ React / TypeScript rules and the client-side financial rules.
 
 ## Idempotent client behavior
 
-The API has no idempotent mutations today: `POST /api/card-transactions` creates a new record on every call. Do not add automatic transport-level retries to a mutation the contract does not declare idempotent; surface the error and let the user decide to retry. When a task adds a mutating endpoint that explicitly supports an idempotency key:
+`POST /api/card-transactions` requires an `Idempotency-Key` header: `createCardTransaction(s)` in `src/api/cardTransactions.ts` take the key as a parameter, `newIdempotencyKey()` mints one (`crypto.randomUUID()`), and `CreateCardTransactionsForm` mints one per logical submission and reuses it (`submissionFor`) while the validated inputs are unchanged and the create has not succeeded; `postJson` in `src/api/client.ts` carries request-specific headers for it. There are still no automatic transport-level retries: surface the error and let the user decide to retry. The rules, for this endpoint and for any mutating endpoint a task adds with an idempotency key:
 
-- Generate the key once per logical user action (for example when the user submits a form) and reuse it for every retry of that action; do not generate a new key merely because a transport retry occurred.
-- Keep double-submit protection in the UI (disable the form while `submitting`, as `CreateCardTransactionsForm` does) so retries cannot create a second logical operation.
+- Generate the key once per logical user action (for example when the user submits a form) and reuse it for every retry of that action; do not generate a new key merely because a transport retry occurred. A new submission gets a new key even if its payload equals an earlier one.
+- Keep double-submit protection in the UI (disable the form while `submitting`, as `CreateCardTransactionsForm` does) so retries cannot create a second logical operation, and keep the key of a failed attempt with its validated inputs so the user's own resubmit of the unchanged request reuses it. Bind the key to the validated domain values (what the server fingerprints), not to raw field edits: an edit that does not change the request must still replay.
 - Do not add client-side idempotency machinery to endpoints that do not support it.
 
 Database transaction and concurrency rules belong to the backend and are not repeated here.

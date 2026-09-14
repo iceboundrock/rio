@@ -30,6 +30,7 @@ import io.ktor.server.routing.Route
  *   malformed Accept header              -> 400 VALIDATION_ERROR, before routing (ValidateAccept below)
  *   unsupported request content type     -> 415 VALIDATION_ERROR
  *   NotFoundException, unmatched route   -> 404 NOT_FOUND
+ *   IdempotencyConflictException         -> 422 IDEMPOTENCY_CONFLICT
  *   unacceptable Accept header           -> 406 VALIDATION_ERROR, before routing (ValidateAccept below)
  *   method not routed                    -> 405 VALIDATION_ERROR + Allow (methodNotAllowed below), or OPTIONS -> 204 + Allow
  *   anything else                        -> 500 INTERNAL_ERROR (logged, message not exposed)
@@ -50,6 +51,12 @@ fun Application.configureErrorHandling() {
         }
         exception<NotFoundException> { call, e ->
             call.respondApiError(HttpStatusCode.NotFound, ApiError(ApiError.NOT_FOUND, e.message ?: "not found"))
+        }
+        exception<IdempotencyConflictException> { call, e ->
+            call.respondApiError(
+                HttpStatusCode.UnprocessableEntity,
+                ApiError(ApiError.IDEMPOTENCY_CONFLICT, e.message ?: "Idempotency-Key was already used with a different request"),
+            )
         }
         exception<BadRequestException> { call, e ->
             // ContentNegotiation wraps header parsing failures and every converter failure in

@@ -68,10 +68,13 @@ backend/src/main/kotlin/ai/project/rio/
   Application.kt       wiring + main()
   db/                  Database (SQLite connection setup), JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
-  cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire)
+  cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire),
+                       IdempotencyRepository (Idempotency-Key SQL), RequestFingerprint (SHA-256 identity of a validated create)
   http/                ApiError, ErrorHandling (exception -> status mapping), JsonConverter (fastjson2 <-> HTTP bodies),
                        JsonSyntax (RFC 8259 grammar check), EcmaScript (the whitespace set JSON Schema `\s` means)
 backend/src/test/...   MoneyTest, JdbcTemplateTest, TransactionalServiceTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
+                       CardTransactionServiceTest (replay, conflict, rollback, restart, parallel keys), CardTransactionIdempotencyRepositoryTest,
+                       CardTransactionRequestFingerprintTest, SchemaInitializerTest,
                        contract/JsonSchemaAssertions (fastjson2 JSONSchema over ../contracts/schemas with $refs inlined and
                        `pattern`s translated from ECMAScript to Java regex), JsonSchemaAssertionsTest, EcmaScriptPatternsTest, JsonSyntaxTest
 frontend/src/
@@ -89,7 +92,7 @@ features/              one Markdown spec per interview feature
 |--------|-------------------------------|--------------------------------------|----------|
 | GET    | `/api/card-transactions`      | 200 `{ "items": [CardTransaction] }` | —        |
 | GET    | `/api/card-transactions/{id}` | 200 `CardTransaction`                | 404      |
-| POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body | 400, 415 |
+| POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body; requires `Idempotency-Key` | 400, 415, 422 |
 
 Each path in the table also answers 405 for a method it does not route, with an `Allow` header
 listing the methods it supports (`GET, POST, OPTIONS` for the collection, `GET, OPTIONS` for one
@@ -118,7 +121,7 @@ including an unknown sub-path such as `/api/card-transactions/{id}/extra`, stays
 ]
 
 // Any error
-{ "code": "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR", "message": "amount must be positive" }
+{ "code": "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR" | "IDEMPOTENCY_CONFLICT", "message": "amount must be positive" }
 ```
 
 `amount.amount` is a base-10 integer string in minor units (`"1800"` = USD 18.00, `"1800"` = JPY 1800).
@@ -128,6 +131,33 @@ An array body must have at least one item and is inserted in one database transa
 invalid the request is 400 and nothing is persisted. The message names the failing item by its 0-based
 position, followed by the single-object message: `[1]: amount must be positive`. Any other JSON kind
 (`true`, `"x"`, `42`, `null`) is `malformed request body`.
+
+POST requires exactly one `Idempotency-Key` header: an opaque, case-sensitive value of 1 to 255 characters
+with no control characters and not blank (a UUID per logical submission, reused when the client retries that same request, is the recommended client value). It is
+checked before the body: a missing header is 400 `missing Idempotency-Key header`, a blank, over-long or
+control-character value is 400 `invalid Idempotency-Key header`, two field lines are 400
+`multiple Idempotency-Key headers`, and none of these consume the key. One caveat: the HTTP engine (Netty)
+rejects a C0 control character or DEL in any header value while decoding the request, before any route
+runs, with its own plain-text 400 rather than the `ApiError` shape; the route's check is what catches the
+remaining control characters (C1, such as U+0085). The key names one logical create
+operation, not a payload: it exists so a client that never saw the `201` can retry safely.
+
+- **First use**: the request is processed as described above and answered `201`.
+- **Replay**: the same key with the same logical request answers `201` with the same body as the first time,
+  including ids, `createdAt` and batch order, and inserts nothing. There is no replay indicator.
+- **Conflict**: the same key with a different logical request answers 422 `IDEMPOTENCY_CONFLICT`
+  (`Idempotency-Key was already used with a different request`) and writes nothing.
+- **Identity** is the validated request, not the JSON text: the trimmed description, the amount in minor
+  units, the currency, the type, the item order, and whether the body was an object or an array (`{...}` and
+  `[{...}]` answer with different shapes, so they are different requests). Member order and whitespace do
+  not matter. Two different keys with identical data are two transactions: this is retry deduplication,
+  not duplicate-transaction detection.
+- **Failure window**: a request rejected before the transaction (media types, malformed JSON, invalid
+  fields, blank descriptions, non-positive amounts, an invalid batch item) leaves the key unused. The key
+  is claimed inside the same SQLite transaction as the rows and the ordered id mapping, so a rollback
+  releases it and a commit consumes it even if the response is lost. Keys never expire.
+- **Concurrency**: the primary key on the stored key decides ownership. Parallel requests with the same key
+  produce one set of rows; the others wait for the writer and replay it, or get 422 if their payload differs.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
@@ -170,7 +200,9 @@ The selected semantics (RFC 9110 §12.5.1):
   because the produced type carries no parameter a range could select between.
 
 The 406 body is itself the JSON `ApiError` shape even though the caller said it would not accept JSON;
-there is no empty error response anywhere in the API. Because every outcome depends on `Accept`,
+there is no empty error response anywhere in the API. The one response not in that shape comes from the
+HTTP engine rather than the API: a request whose headers Netty cannot decode (a control character in a
+field value, for instance) gets Netty's plain-text 400 before Ktor sees it. Because every outcome depends on `Accept`,
 every response carries `Vary: Accept` (§12.5.5), so a shared cache cannot reuse a stored JSON body
 for a request the server would reject.
 
@@ -180,12 +212,14 @@ Media-type matching is case-insensitive and accepts parameters such as `charset=
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
 Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, database, and UI.
-If an existing local database predates this currency set, stop the backend and delete the database
+If an existing local database predates this currency set or the idempotency tables, stop the backend and delete the database
 file before restarting: `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the
 backend was started from (`backend/data/rio.db` with the commands above). This resets local
 card transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
-Startup checks the stored table DDL against the current definition and stops with reset instructions
-if they differ, before serving requests. The check normalizes SQLite's `CREATE TABLE` prefix and
+Startup creates the tables only for a fresh file. For an existing file it requires every table to be
+present and checks the stored DDL against the current definition, and it stops with reset instructions
+before serving requests (and before running any DDL) if a table is missing or differs, so a database
+from before a schema change is never quietly extended. The check normalizes SQLite's `CREATE TABLE` prefix and
 trailing whitespace/semicolon, but compares the column/constraint body exactly. This is not SQL
 semantic equivalence: manually reformatted bodies or modified definitions also require a reset.
 
@@ -295,7 +329,7 @@ hints. Defaults leave driver settings untouched; ordinary features need only the
 ## Not implemented on purpose
 
 Search, filtering, sorting, pagination, categories, edit/delete, accounts, balances, transfers,
-spending limits, fees, idempotency, concurrency control, FX, auth, migrations. These are the
+spending limits, fees, FX, auth, migrations, concurrency control beyond the `Idempotency-Key` claim. These are the
 interview exercises; see `features/README.md`.
 
 ## Configuration

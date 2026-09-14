@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { createCardTransactions } from "../api/cardTransactions";
+import { useRef, useState, type FormEvent } from "react";
+import { createCardTransactions, newIdempotencyKey } from "../api/cardTransactions";
 import { describeError } from "../api/errors";
 import { CURRENCIES, MAX_WIRE_AMOUNT, moneyFromDecimalString, type CurrencyCode } from "../money/money";
 import type { CardTransactionType, CreateCardTransactionInput } from "../types/cardTransaction";
@@ -36,6 +36,30 @@ export function validateRows(rows: FormRow[]): { inputs: CreateCardTransactionIn
     return null;
   });
   return { inputs: rowErrors.every((e) => e === null) ? inputs : null, rowErrors };
+}
+
+/** One logical create as handed to the server: the validated inputs and the key that identifies them. */
+export interface Submission {
+  idempotencyKey: string;
+  inputs: CreateCardTransactionInput[];
+}
+
+function sameInputs(a: CreateCardTransactionInput[], b: CreateCardTransactionInput[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((x, i) => x.description === b[i].description && x.amount.amount === b[i].amount.amount && x.amount.currency === b[i].amount.currency && x.type === b[i].type)
+  );
+}
+
+/**
+ * Picks the submission for this click. When the validated inputs equal the previous attempt's (the same
+ * identity the server fingerprints: description, minor units, currency, type, order), the previous key is
+ * reused: if that attempt committed but its response was lost, the server replays it instead of creating
+ * again, and if it was rejected or rolled back the key is still free and the create proceeds. A changed
+ * request gets a fresh key so it cannot collide with the previous one (422 `IDEMPOTENCY_CONFLICT`).
+ */
+export function submissionFor(previous: Submission | null, inputs: CreateCardTransactionInput[]): Submission {
+  return previous !== null && sameInputs(previous.inputs, inputs) ? previous : { idempotencyKey: newIdempotencyKey(), inputs };
 }
 
 export interface CreateCardTransactionsFormViewProps {
@@ -115,6 +139,8 @@ export default function CreateCardTransactionsForm({ onCreated }: { onCreated: (
   const [rowErrors, setRowErrors] = useState<(string | null)[]>([null]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // The last attempt that did not succeed; a resubmit of the same request reuses its key (see `submissionFor`).
+  const pending = useRef<Submission | null>(null);
 
   const onChangeRow = (index: number, patch: Partial<FormRow>) =>
     setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -133,8 +159,13 @@ export default function CreateCardTransactionsForm({ onCreated }: { onCreated: (
     setError(null);
     if (inputs === null) return;
     setSubmitting(true);
+    // `submitting` keeps one click from becoming two; `pending` keeps a retry after an error from
+    // becoming a second logical create. A new submission after success gets a new key.
+    const submission = submissionFor(pending.current, inputs);
+    pending.current = submission;
     try {
-      await createCardTransactions(inputs);
+      await createCardTransactions(submission.inputs, submission.idempotencyKey);
+      pending.current = null;
       setRows([emptyRow()]);
       setRowErrors([null]);
       onCreated();
