@@ -17,3 +17,6 @@ frontend/dist/
 .DS_Store
 .gradle/
 build/
+
+# Local server state
+/.start.pids

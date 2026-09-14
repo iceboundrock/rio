@@ -4,6 +4,25 @@
 set -eu
 
 cd "$(dirname "$0")"
+PID_FILE="$PWD/.start.pids"
+PID_FILE_TMP="$PID_FILE.$$"
+
+# True when $1 is the pid of a running start.sh. The pid file can outlive a crashed run and
+# the OS may hand its pid to something else, so check the command line, not just liveness.
+is_start_sh() {
+  case "$1" in ''|0|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null || return 1
+  case "$(ps -o args= -p "$1" 2>/dev/null)" in */start.sh|*" start.sh") return 0 ;; *) return 1 ;; esac
+}
+
+if [ -f "$PID_FILE" ]; then
+  running=
+  IFS= read -r running < "$PID_FILE" || true
+  if is_start_sh "$running"; then
+    echo "==> already running (./start.sh pid $running); run ./stop.sh first" >&2
+    exit 1
+  fi
+fi
 
 if [ ! -d frontend/node_modules ]; then
   echo "==> frontend: npm install"
@@ -30,6 +49,7 @@ stop() {
   echo
   echo "==> stopping"
   pids=$(tree "$BACKEND_PID"; tree "$FRONTEND_PID")
+  rm -f "$PID_FILE" "$PID_FILE_TMP"
   kill $pids 2>/dev/null || true
   # Vite's graceful shutdown sometimes hangs; give everything a moment, then force it.
   for _ in 1 2 3 4 5; do
@@ -40,6 +60,10 @@ stop() {
   wait 2>/dev/null || true
 }
 trap stop INT TERM EXIT
+
+# Record our own pid so ./stop.sh can ask this run to shut down through the trap above.
+printf '%s\n' "$$" > "$PID_FILE_TMP"
+mv "$PID_FILE_TMP" "$PID_FILE"
 
 # Exit as soon as either process dies (e.g. port in use); the trap stops the other.
 while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do

@@ -14,6 +14,7 @@ Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, s
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both
+./stop.sh                # stop both servers from another terminal
 ```
 
 Or separately:
