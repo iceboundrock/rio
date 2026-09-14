@@ -10,7 +10,7 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74). No Docker, no external database.
+Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash). No Docker, no external database.
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both

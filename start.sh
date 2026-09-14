@@ -24,6 +24,9 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
+# Not --frozen-lockfile, unlike verify.sh and CI: this is the dev path, so a package.json edited
+# since the last install should update pnpm-lock.yaml here rather than fail. pnpm freezes it by
+# itself when it detects a CI environment.
 if [ ! -d frontend/node_modules ]; then
   echo "==> frontend: pnpm install"
   (cd frontend && pnpm install --loglevel=error)
