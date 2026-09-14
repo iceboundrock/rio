@@ -16,7 +16,7 @@ Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`.
 - HTTP translation belongs in routes and `http/ErrorHandling.kt`. Throw `ValidationException` (400) or `NotFoundException` (404).
 - Do not create generic repository hierarchies or interfaces with a single implementation.
 - Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and reset the database file. That file is `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the backend was started from (`backend/data/rio.db` with the README's `cd backend && ./gradlew run`).
-- Keep the startup schema-drift guard in `SchemaInitializer.initialize`: it compares the stored DDL with the current definition and refuses to start with reset instructions, and `SchemaInitializerTest` covers it. Do not add code that migrates an old database or keeps serving it; a mismatch is always a reset.
+- Keep the startup schema-drift guard in `SchemaInitializer.initialize`: tables are created only for a fresh file (none of the expected tables present); otherwise every expected table must exist and its stored DDL must match the current definition, or startup refuses with reset instructions before running any DDL. `SchemaInitializerTest` covers it. Do not add code that migrates an old database, completes a file that has only some of the tables, or keeps serving it; a mismatch is always a reset.
 
 ## Money
 

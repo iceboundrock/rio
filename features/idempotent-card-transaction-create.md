@@ -45,7 +45,8 @@ a retry replay the committed result instead of writing again.
 - Two tables in `SchemaInitializer`, created after `card_transactions`:
   `card_transaction_idempotency (idempotency_key PK, request_fingerprint, request_shape CHECK IN ('ONE','MANY'), created_at)`
   and `card_transaction_idempotency_items (idempotency_key FK ON DELETE CASCADE, item_index >= 0, card_transaction_id FK, PK (key, index))`.
-  The startup drift guard covers all three tables.
+  The startup drift guard covers all three tables: a file that has `card_transactions` but not the
+  idempotency tables predates this feature and is refused with reset instructions, not extended.
 - SQL lives in a new `CardTransactionIdempotencyRepository`; no generic idempotency abstraction.
 - Service flow: validate and normalize every item → compute fingerprint → `transactional { tx -> }`:
   first statement is `INSERT ... ON CONFLICT(idempotency_key) DO NOTHING`. Claimed → insert the card

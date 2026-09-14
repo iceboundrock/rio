@@ -216,8 +216,10 @@ If an existing local database predates this currency set or the idempotency tabl
 file before restarting: `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the
 backend was started from (`backend/data/rio.db` with the commands above). This resets local
 card transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
-Startup checks the stored table DDL against the current definition and stops with reset instructions
-if they differ, before serving requests. The check normalizes SQLite's `CREATE TABLE` prefix and
+Startup creates the tables only for a fresh file. For an existing file it requires every table to be
+present and checks the stored DDL against the current definition, and it stops with reset instructions
+before serving requests (and before running any DDL) if a table is missing or differs, so a database
+from before a schema change is never quietly extended. The check normalizes SQLite's `CREATE TABLE` prefix and
 trailing whitespace/semicolon, but compares the column/constraint body exactly. This is not SQL
 semantic equivalence: manually reformatted bodies or modified definitions also require a reset.
 
