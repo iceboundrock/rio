@@ -39,11 +39,16 @@ jobs:
       # into the build or test setup fails here; local development on a newer Node covers the
       # other end. It has to be the exact version: a wildcard such as '24.x' resolves to the
       # newest 24 release, which is not the floor. Move this pin whenever the range moves.
-      - uses: actions/setup-node@v5
+      # pnpm/setup installs that Node alongside the pnpm version pinned by `packageManager` in
+      # frontend/package.json and caches the pnpm store keyed on frontend/pnpm-lock.yaml. The
+      # action's own `pnpm install` is off because ./verify.sh runs it.
+      - uses: pnpm/setup@v2
         with:
-          node-version: '24.21.0'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          runtime: node@24.21.0
+          package-json-file: frontend/package.json
+          install: false
+          cache: true
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       # Backend tests (real Ktor pipeline, temporary SQLite files), frontend tests,
       # typecheck and production build. No external services and no secrets.

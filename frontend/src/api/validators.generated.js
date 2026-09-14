@@ -1,5 +1,5 @@
 // GENERATED FILE - DO NOT EDIT.
-// Built from contracts/schemas/*.schema.json by scripts/generate-validators.mjs (npm run generate:validators).
+// Built from contracts/schemas/*.schema.json by scripts/generate-validators.mjs (pnpm run generate:validators).
 import func1 from "ajv/dist/runtime/ucs2length.js";
 
 export const validateApiError = validate20;

@@ -6,7 +6,7 @@
 // executes that code plus the small helpers under ajv/dist/runtime/*.
 //
 // The output is a build artifact derived from contracts/schemas/*.schema.json (the source of truth).
-// Never edit it by hand: run `npm run generate:validators` (also run by `pretest` and `prebuild`),
+// Never edit it by hand: run `pnpm run generate:validators` (the `test` and `build` scripts run it first),
 // and commit the result. ./verify.sh fails when the checked-in files are stale.
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -20,7 +20,7 @@ const schemasDir = path.resolve(frontendDir, "../contracts/schemas");
 const outputBase = path.resolve(frontendDir, "src/api/validators.generated");
 
 const HEADER = `// GENERATED FILE - DO NOT EDIT.
-// Built from contracts/schemas/*.schema.json by scripts/generate-validators.mjs (npm run generate:validators).
+// Built from contracts/schemas/*.schema.json by scripts/generate-validators.mjs (pnpm run generate:validators).
 `;
 
 // Same options as the former runtime instance, plus code.source/esm so Ajv keeps the generated source.
