@@ -45,9 +45,10 @@ jobs:
       - uses: pnpm/setup@v2
         with:
           runtime: node@24.21.0
-          working-directory: frontend
+          package-json-file: frontend/package.json
           install: false
           cache: true
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       # Backend tests (real Ktor pipeline, temporary SQLite files), frontend tests,
       # typecheck and production build. No external services and no secrets.
