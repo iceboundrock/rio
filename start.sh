@@ -44,16 +44,24 @@ tree() {
   echo "$1"
 }
 
+# True while any of the given pids is still running. `kill -0 $pids` is not enough: dash's kill
+# fails as soon as one pid is gone, bash's succeeds while one is alive.
+alive() {
+  for p in "$@"; do kill -0 "$p" 2>/dev/null && return 0; done
+  return 1
+}
+
 stop() {
   trap - INT TERM EXIT
   echo
   echo "==> stopping"
+  # Newline-separated; expanded unquoted below on purpose so each pid is its own argument.
   pids=$(tree "$BACKEND_PID"; tree "$FRONTEND_PID")
   rm -f "$PID_FILE" "$PID_FILE_TMP"
   kill $pids 2>/dev/null || true
   # Vite's graceful shutdown sometimes hangs; give everything a moment, then force it.
   for _ in 1 2 3 4 5; do
-    kill -0 $pids 2>/dev/null || break
+    alive $pids || break
     sleep 1
   done
   kill -KILL $pids 2>/dev/null || true
