@@ -28,7 +28,8 @@ done
 
 # vitest.config.ts starts every test worker with --disallow-code-generation-from-strings, so a validator
 # that quietly went back to runtime compilation fails here instead of in a browser with a strict CSP.
-# --ignore-scripts skips the pretest hook: the generator already ran above.
+# --ignore-scripts skips the pretest hook: the generator already ran above and its output was checked
+# against the committed artifact, so running it again here would only rewrite the same files.
 echo "==> frontend: npm test -- --run (eval disabled in test workers)"
 (cd frontend && npm test --ignore-scripts -- --run)
 

@@ -52,6 +52,15 @@ describe("create card transactions form (mounted)", () => {
     expect(field("Description 1").value).toBe("");
     expect(field("Amount 1").value).toBe("");
     expect(screen.queryByText(/Could not reach the server/)).toBeNull();
+
+    // The next submission is a new logical create even though its payload is identical: reusing the
+    // key would make the server replay the first create instead of inserting a second one.
+    fetch.mockResolvedValueOnce(created());
+    type("Description 1", "Lunch");
+    type("Amount 1", "18.00");
+    clickCreate();
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(2));
+    expect(fetch.mock.calls.map(idempotencyKeyOf)[2]).not.toBe(keys[0]);
   });
 
   it("keeps the key across a cosmetic edit and mints a new one when the request changes", async () => {
