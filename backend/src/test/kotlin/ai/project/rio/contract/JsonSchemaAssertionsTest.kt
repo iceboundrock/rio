@@ -3,17 +3,22 @@ package ai.project.rio.contract
 import ai.project.rio.contract.JsonSchemaAssertions.assertMatchesSchema
 import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
 import com.alibaba.fastjson2.JSON
-import com.alibaba.fastjson2.JSONObject
-import java.nio.file.Files
+import com.networknt.schema.InputFormat
+import com.networknt.schema.Schema
+import com.networknt.schema.SchemaException
+import com.networknt.schema.SchemaLocation
+import com.networknt.schema.SchemaRegistry
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * fastjson2's JSONSchema fails open: a `$ref` it cannot resolve validates anything, and a keyword it
- * does not implement is simply ignored. These cases prove that every keyword the contracts use, and
- * every reference between them, still rejects what it is meant to reject after inlining.
+ * The oracle must agree with Ajv in the browser. These cases are every keyword the contracts use,
+ * every reference between them, and each divergence found so far (#32) between a Java-flavoured
+ * reading of the contracts and the ECMAScript one the schema means.
  */
 class JsonSchemaAssertionsTest {
 
@@ -104,8 +109,9 @@ class JsonSchemaAssertionsTest {
     }
 
     /**
-     * fastjson2 compiles `pattern` as a Java regex and matches with find(); the schema means ECMAScript.
-     * Without translation the first two documents validate here and fail in the browser.
+     * `pattern` means ECMAScript (Ajv compiles it with the `u` flag). Under java.util.regex the first
+     * two documents validate here and fail in the browser: `\\S` matches U+FEFF and `$` also matches
+     * before a final newline.
      */
     @Test
     fun `patterns are read with ECMAScript semantics`() {
@@ -114,6 +120,42 @@ class JsonSchemaAssertionsTest {
         assertViolatesSchema(request("\"Lunch\"" to "\"\u00A0\u2003\u3000\""), "create-card-transaction-request.schema.json")
         assertMatchesSchema(request("\"Lunch\"" to "\"\\u001C\""), "create-card-transaction-request.schema.json")
     }
+
+    /**
+     * The one construct joni reads differently from ECMAScript: its `.` excludes only U+000A, while
+     * `/./u` also excludes U+000D, U+2028 and U+2029. This pins the divergence as it stands so the
+     * guard below is dropped, not forgotten, once the engine agrees with the browser.
+     */
+    @Test
+    fun `joni dot still accepts CR, LS and PS, unlike ECMAScript`() {
+        val dot = schema(".", JsonSchemaAssertions::engine)
+        assertViolatesPattern(dot, "\n")
+        for (terminator in listOf("\r", " ", " ")) assertMatchesPattern(dot, terminator)
+    }
+
+    /** Because of the divergence above, an unescaped `.` outside a class is refused at load, never matched. */
+    @Test
+    fun `a contract pattern with an unescaped dot is refused at load`() {
+        for (pattern in listOf("a.c", "^.$", "[a].", "\\\\.")) {
+            val error = assertFailsWith<IllegalStateException>(pattern) { schema(pattern, JsonSchemaAssertions::registry) }
+            assertContains(error.message.orEmpty(), pattern)
+        }
+        for ((pattern, text) in listOf("a\\.c" to "a.c", "^[.]$" to ".", "^[a.]+$" to "a.a", "\\S" to "x")) {
+            assertMatchesPattern(schema(pattern, JsonSchemaAssertions::registry), text)
+        }
+    }
+
+    private fun schema(pattern: String, registry: (Map<String, String>) -> SchemaRegistry): Schema {
+        val id = "https://rio.local/schemas/pattern.schema.json"
+        val schema = """{"type":"string","pattern":${JSON.toJSONString(pattern)}}"""
+        return registry(mapOf(id to schema)).getSchema(SchemaLocation.of(id))
+    }
+
+    private fun assertMatchesPattern(schema: Schema, text: String) =
+        assertTrue(schema.validate(JSON.toJSONString(text), InputFormat.JSON).isEmpty(), "expected ${JSON.toJSONString(text)} to match")
+
+    private fun assertViolatesPattern(schema: Schema, text: String) =
+        assertFalse(schema.validate(JSON.toJSONString(text), InputFormat.JSON).isEmpty(), "expected ${JSON.toJSONString(text)} to violate")
 
     /** JSON.parse alone accepts these; the browser's JSON.parse does not, so neither may the oracle. */
     @Test
@@ -132,21 +174,19 @@ class JsonSchemaAssertionsTest {
         assertViolatesSchema("""{"code":"NOT_FOUND","message":1}""", "api-error.schema.json")
     }
 
+    /**
+     * Remote fetching is off, so a `$ref` the registry cannot resolve is an error, never a pass.
+     * The target is a real file: with networknt's opt-in `fetchRemoteResources()` this `file:` ref
+     * would load and validate, so the test pins the fetcher being off, not merely a missing target.
+     * networknt resolves references lazily, so the error surfaces on the first validation.
+     */
     @Test
-    fun `inlined schemas contain no references and refuse what the loader cannot resolve`() {
-        val dir = Path.of(System.getProperty("contracts.schemas.dir"))
-        val files = Files.list(dir).use { list -> list.map { it.fileName.toString() }.filter { it.endsWith(".schema.json") }.toList() }
-        assertTrue(files.size >= 6, "expected the contract files, found $files")
-        for (file in files) {
-            val text = JSON.toJSONString(JsonSchemaAssertions.inlined(file))
-            assertTrue(!text.contains("\"\$ref\"") && !text.contains("\"\$defs\""), "$file still references: $text")
+    fun `an unresolvable ref is an error instead of validating anything`() {
+        val id = "https://rio.local/schemas/broken.schema.json"
+        val onDisk = Path.of(System.getProperty("contracts.schemas.dir")).resolve("money.schema.json").toUri()
+        val registry = JsonSchemaAssertions.registry(mapOf(id to """{"${'$'}ref":"$onDisk"}"""))
+        assertFailsWith<SchemaException> {
+            registry.getSchema(SchemaLocation.of(id)).validate(money, InputFormat.JSON)
         }
-        fun ref(target: String) = JSONObject.of("\$ref", target)
-        assertFailsWith<IllegalStateException> { JsonSchemaAssertions.inline(ref("nope.schema.json"), "money.schema.json") }
-        assertFailsWith<IllegalStateException> { JsonSchemaAssertions.inline(ref("money.schema.json#/definitions/positive"), "money.schema.json") }
-        assertFailsWith<IllegalStateException> { JsonSchemaAssertions.inline(ref("money.schema.json#/\$defs/missing"), "money.schema.json") }
-        assertFailsWith<IllegalStateException> { JsonSchemaAssertions.inline(ref("money.schema.json#/\$defs/positive/allOf/0"), "money.schema.json") }
-        assertFailsWith<IllegalStateException> { JsonSchemaAssertions.inline(JSONObject.of("\$ref", "#", "minLength", 1), "money.schema.json") }
-        assertFailsWith<IllegalStateException> { JsonSchemaAssertions.inline(ref("#"), "money.schema.json", listOf("money.schema.json#")) }
     }
 }
