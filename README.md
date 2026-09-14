@@ -91,8 +91,9 @@ features/              one Markdown spec per interview feature
 | GET    | `/api/card-transactions/{id}` | 200 `CardTransaction`                | 404      |
 | POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body | 400, 415 |
 
-Any path also answers 405 for a method it does not route and 406 for an unsatisfiable `Accept`,
-the latter before the route runs.
+Any path also answers 405 for a method it does not route, with an `Allow` header listing the
+methods it does (`GET, POST` for the collection, `GET` for one card transaction); `OPTIONS` returns
+204 with the same `Allow`. An unsatisfiable `Accept` answers 406 before the route runs.
 
 ```json
 // CardTransaction
@@ -140,7 +141,7 @@ Validation error *responses* describe constraints without echoing request values
 not redacted and still record the full request line.
 A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.
 Error responses are explicitly serialized as JSON regardless of `Accept`, including the status the
-framework raises on its own: an unroutable method returns 405 `method not allowed`.
+framework raises on its own: an unroutable method returns 405 `method not allowed` with `Allow`.
 
 Every response this API produces — success or error — is `application/json`, so acceptability is
 decided from `Accept` alone, *before* any route runs: a request that excludes JSON returns 406

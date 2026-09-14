@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON
 import io.ktor.http.BadContentTypeFormatException
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.server.application.Application
@@ -19,6 +20,8 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.ApplicationRequest
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.routing.HttpMethodRouteSelector
+import io.ktor.server.routing.Route
 
 /**
  * Central exception -> HTTP mapping.
@@ -28,7 +31,7 @@ import io.ktor.server.response.respond
  *   unsupported request content type     -> 415 VALIDATION_ERROR
  *   NotFoundException, unmatched route   -> 404 NOT_FOUND
  *   unacceptable Accept header           -> 406 VALIDATION_ERROR, before routing (ValidateAccept below)
- *   method not routed                    -> 405 VALIDATION_ERROR (framework-generated status)
+ *   method not routed                    -> 405 VALIDATION_ERROR + Allow (methodNotAllowed below), or OPTIONS -> 204 + Allow
  *   anything else                        -> 500 INTERNAL_ERROR (logged, message not exposed)
  *
  * This also installs request-side Accept validation, which can turn a request that would have
@@ -87,7 +90,8 @@ fun Application.configureErrorHandling() {
             call.respondApiError(status, ApiError(ApiError.NOT_FOUND, "no matching route"))
         }
         // Routing and ContentNegotiation produce these without an exception, so they would otherwise
-        // answer with an empty body and break the "every error is an ApiError" contract.
+        // answer with an empty body and break the "every error is an ApiError" contract. The 405 is
+        // normally raised by methodNotAllowed, which only sets Allow and leaves the body to this page.
         status(HttpStatusCode.MethodNotAllowed) { call, status ->
             call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, "method not allowed"))
         }
@@ -107,6 +111,25 @@ fun Application.configureErrorHandling() {
             if (!acceptsProducedType(call.request.acceptRanges())) throw NotAcceptableException(NO_ACCEPTABLE_RESPONSE)
         }
     })
+}
+
+/**
+ * Fallback for the methods a resource does not route, declared under the same `route {}` as the ones
+ * it does. Ktor's resolver prefers a method-specific sibling to this bare handler when both match and
+ * falls through to it otherwise; Ktor itself never sets Allow on the 405 it raises. Allow is read from
+ * the sibling method routes per request, so the list cannot drift from what is actually routed.
+ * Answers OPTIONS 204 with that list (RFC 9110 9.3.7) and everything else 405 + Allow (15.5.6), the
+ * body shaped by the status page.
+ */
+fun Route.methodNotAllowed() {
+    val route = this
+    handle {
+        val allowed = route.children.mapNotNull { (it.selector as? HttpMethodRouteSelector)?.method }
+        check(allowed.isNotEmpty()) { "methodNotAllowed() must sit beside at least one method route" }
+        call.response.header(HttpHeaders.Allow, allowed.joinToString(", ") { it.value })
+        if (call.request.local.method == HttpMethod.Options) call.respond(HttpStatusCode.NoContent)
+        else call.respond(HttpStatusCode.MethodNotAllowed)
+    }
 }
 
 private const val NO_ACCEPTABLE_RESPONSE = "no acceptable response media type"
