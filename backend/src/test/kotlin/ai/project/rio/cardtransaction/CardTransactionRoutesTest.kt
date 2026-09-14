@@ -4,6 +4,7 @@ import ai.project.rio.contract.JsonSchemaAssertions.assertMatchesSchema
 import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
 import ai.project.rio.db.Database
 import ai.project.rio.db.SchemaInitializer
+import ai.project.rio.http.IdempotencyConflictException
 import ai.project.rio.http.configureErrorHandling
 import ai.project.rio.http.fastjson2
 import ai.project.rio.module
@@ -454,6 +455,20 @@ class CardTransactionRoutesTest {
             logger?.detachAppender(events)
             events.stop()
         }
+    }
+
+    @Test
+    fun `an idempotency conflict is 422 with the shared error shape`() = withApp {
+        application {
+            routing { get("/test-conflict") { throw IdempotencyConflictException("boom") } }
+        }
+        val response = client.get("/test-conflict")
+        assertEquals(HttpStatusCode.UnprocessableEntity, response.status)
+        assertEquals("application/json", response.headers[HttpHeaders.ContentType])
+        val body = response.bodyAsText()
+        assertMatchesSchema(body, "api-error.schema.json")
+        assertEquals("IDEMPOTENCY_CONFLICT", JSON.parseObject(body).getString("code"))
+        assertEquals("boom", JSON.parseObject(body).getString("message"))
     }
 
     // ---- Cross-layer currency and media-type contracts ----

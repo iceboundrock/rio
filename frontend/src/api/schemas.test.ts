@@ -84,6 +84,7 @@ describe("create card transactions request schema", () => {
 describe("api error schema", () => {
   it("accepts known codes only", () => {
     expect(validateApiError({ code: "NOT_FOUND", message: "card transaction x not found" })).toBe(true);
+    expect(validateApiError({ code: "IDEMPOTENCY_CONFLICT", message: "Idempotency-Key was already used with a different request" })).toBe(true);
     expect(validateApiError({ code: "TEAPOT", message: "short and stout" })).toBe(false);
     expect(validateApiError({ code: "NOT_FOUND" })).toBe(false);
   });

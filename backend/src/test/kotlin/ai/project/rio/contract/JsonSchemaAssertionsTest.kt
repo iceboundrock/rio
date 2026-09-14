@@ -36,7 +36,7 @@ class JsonSchemaAssertionsTest {
         assertMatchesSchema(request, "create-card-transaction-request.schema.json")
         assertMatchesSchema(request, "create-card-transactions-request.schema.json")
         assertMatchesSchema("[$request]", "create-card-transactions-request.schema.json")
-        for (code in listOf("VALIDATION_ERROR", "NOT_FOUND", "INTERNAL_ERROR")) {
+        for (code in listOf("VALIDATION_ERROR", "NOT_FOUND", "INTERNAL_ERROR", "IDEMPOTENCY_CONFLICT")) {
             assertMatchesSchema("""{"code":"$code","message":"x"}""", "api-error.schema.json")
         }
     }
