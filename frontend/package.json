@@ -8,8 +8,11 @@
   },
   "scripts": {
     "dev": "vite",
+    "generate:validators": "node scripts/generate-validators.mjs",
+    "prebuild": "npm run generate:validators",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretest": "npm run generate:validators",
     "test": "vitest",
     "typecheck": "tsc --noEmit"
   },
