@@ -43,7 +43,7 @@ class CardTransactionServiceTest {
     fun setUp() {
         dbFile = Files.createTempFile("card-transaction-service-test", ".db")
         jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc)
+        SchemaInitializer.initialize(jdbc, dbFile)
         repository = CardTransactionRepository(jdbc)
         service = CardTransactionService(jdbc, Clock.fixed(fixedInstant, ZoneOffset.UTC))
     }
@@ -246,7 +246,7 @@ class CardTransactionServiceTest {
         val first = service.createAll("key-1", listOf(lunch, salary))
 
         val reopened = Database.open(dbFile)
-        SchemaInitializer.initialize(reopened)
+        SchemaInitializer.initialize(reopened, dbFile)
         val replay = CardTransactionService(reopened, Clock.fixed(fixedInstant.plusSeconds(60), ZoneOffset.UTC)).createAll("key-1", listOf(lunch, salary))
 
         assertEquals(first, replay)

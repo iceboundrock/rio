@@ -20,7 +20,7 @@ import java.nio.file.Path
 /**
  * Entry point. Wiring is done by hand right here; there is no DI container.
  *
- *   RIO_DB_PATH  SQLite file (default ./data/rio.db)
+ *   RIO_DB_PATH  SQLite file (default data/rio.db)
  *   PORT          HTTP port  (default 8080)
  */
 fun main() {
@@ -29,7 +29,7 @@ fun main() {
 
     dbPath.toAbsolutePath().parent?.toFile()?.mkdirs()
     val jdbc = Database.open(dbPath)
-    SchemaInitializer.initialize(jdbc)
+    SchemaInitializer.initialize(jdbc, dbPath)
     SchemaInitializer.seedIfEmpty(jdbc)
 
     embeddedServer(Netty, port = port) { module(jdbc) }.start(wait = true)

@@ -6,6 +6,7 @@ import ai.project.rio.cardtransaction.CardTransaction
 import ai.project.rio.cardtransaction.CardTransactionRepository
 import ai.project.rio.cardtransaction.CardTransactionStatus
 import ai.project.rio.cardtransaction.CardTransactionType
+import java.nio.file.Path
 import java.time.Instant
 
 /**
@@ -56,11 +57,14 @@ object SchemaInitializer {
         "card_transaction_idempotency_items" to CREATE_CARD_TRANSACTION_IDEMPOTENCY_ITEMS,
     )
 
-    private const val RESET_INSTRUCTIONS =
-        "Stop the backend and delete backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
-            "This resets local card transactions to demo data; back up data you need first."
+    /** Names the exact file to delete: the default is relative to the working directory, and RIO_DB_PATH overrides it. */
+    private fun resetInstructions(dbPath: Path): String =
+        "Stop the backend and delete ${dbPath.toAbsolutePath()} (RIO_DB_PATH if set, otherwise data/rio.db relative to " +
+            "the directory the backend was started from), " +
+            "then restart. This resets local card transactions to demo data; back up data you need first."
 
-    fun initialize(jdbc: JdbcTemplate) {
+    fun initialize(jdbc: JdbcTemplate, dbPath: Path) {
+        val resetInstructions = resetInstructions(dbPath)
         // Decide fresh vs existing before running any DDL: creating a missing table in a file that already
         // has the others would be a silent migration of a pre-existing database.
         if (storedDefinitions(jdbc).isEmpty()) {
@@ -70,12 +74,12 @@ object SchemaInitializer {
         val missing = TABLES.map { it.first }.filter { it !in stored }
         check(missing.isEmpty()) {
             "Database is missing table(s) ${missing.joinToString()}: it predates the current schema and is " +
-                "not migrated. $RESET_INSTRUCTIONS"
+                "not migrated. $resetInstructions"
         }
         for ((table, ddl) in TABLES) {
             val actual = stored.getValue(table)
             check(actual != null && canonicalDdl(actual) == canonicalDdl(ddl)) {
-                "Stored $table schema does not match the current definition. $RESET_INSTRUCTIONS"
+                "Stored $table schema does not match the current definition. $resetInstructions"
             }
         }
     }
