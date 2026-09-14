@@ -4,6 +4,7 @@
 set -eu
 
 cd "$(dirname "$0")"
+PID_FILE="$PWD/.start.pids"
 
 if [ ! -d frontend/node_modules ]; then
   echo "==> frontend: npm install"
@@ -18,6 +19,10 @@ echo "==> frontend: npm run dev    (http://localhost:5173)"
 (cd frontend && exec npm run dev) &
 FRONTEND_PID=$!
 
+PID_FILE_TMP="$PID_FILE.$$"
+printf '%s\n%s\n' "$BACKEND_PID" "$FRONTEND_PID" > "$PID_FILE_TMP"
+mv "$PID_FILE_TMP" "$PID_FILE"
+
 # A pid plus all of its descendants (npm -> sh -> vite). The backend's java is a child
 # of the Gradle daemon, not of gradlew; the daemon kills it when the gradlew client dies.
 tree() {
@@ -30,6 +35,7 @@ stop() {
   echo
   echo "==> stopping"
   pids=$(tree "$BACKEND_PID"; tree "$FRONTEND_PID")
+  rm -f "$PID_FILE" "$PID_FILE_TMP"
   kill $pids 2>/dev/null || true
   # Vite's graceful shutdown sometimes hangs; give everything a moment, then force it.
   for _ in 1 2 3 4 5; do
