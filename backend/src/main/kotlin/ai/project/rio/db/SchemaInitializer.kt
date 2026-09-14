@@ -23,16 +23,47 @@ object SchemaInitializer {
         )
     """.trimIndent()
 
+    // One row per Idempotency-Key ever committed for POST /api/card-transactions. The primary key is
+    // what decides ownership of a key between concurrent requests (CardTransactionService). Keys never
+    // expire: they live as long as this database file.
+    private val CREATE_CARD_TRANSACTION_IDEMPOTENCY = """
+        CREATE TABLE IF NOT EXISTS card_transaction_idempotency (
+            idempotency_key TEXT PRIMARY KEY,
+            request_fingerprint TEXT NOT NULL,
+            request_shape TEXT NOT NULL CHECK (request_shape IN ('ONE', 'MANY')),
+            created_at TEXT NOT NULL
+        )
+    """.trimIndent()
+
+    // The ordered card transactions a key created, so a replay can rebuild the original response.
+    private val CREATE_CARD_TRANSACTION_IDEMPOTENCY_ITEMS = """
+        CREATE TABLE IF NOT EXISTS card_transaction_idempotency_items (
+            idempotency_key TEXT NOT NULL REFERENCES card_transaction_idempotency(idempotency_key) ON DELETE CASCADE,
+            item_index INTEGER NOT NULL CHECK (item_index >= 0),
+            card_transaction_id TEXT NOT NULL REFERENCES card_transactions(id),
+            PRIMARY KEY (idempotency_key, item_index)
+        )
+    """.trimIndent()
+
+    /** Creation order matters: the item table references both others. */
+    private val TABLES = listOf(
+        "card_transactions" to CREATE_CARD_TRANSACTIONS,
+        "card_transaction_idempotency" to CREATE_CARD_TRANSACTION_IDEMPOTENCY,
+        "card_transaction_idempotency_items" to CREATE_CARD_TRANSACTION_IDEMPOTENCY_ITEMS,
+    )
+
     fun initialize(jdbc: JdbcTemplate) {
-        jdbc.update(CREATE_CARD_TRANSACTIONS)
-        val actual = jdbc.queryOne(
-            "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
-            listOf("table", "card_transactions"),
-        ) { it.getString("sql") }
-        check(actual != null && canonicalDdl(actual) == canonicalDdl(CREATE_CARD_TRANSACTIONS)) {
-            "Stored card_transactions schema does not match the current definition. Stop the backend and delete " +
-                "backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
-                "This resets local card transactions to demo data; back up data you need first."
+        for ((table, ddl) in TABLES) {
+            jdbc.update(ddl)
+            val actual = jdbc.queryOne(
+                "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
+                listOf("table", table),
+            ) { it.getString("sql") }
+            check(actual != null && canonicalDdl(actual) == canonicalDdl(ddl)) {
+                "Stored $table schema does not match the current definition. Stop the backend and delete " +
+                    "backend/data/rio.db (or the file configured by RIO_DB_PATH), then restart. " +
+                    "This resets local card transactions to demo data; back up data you need first."
+            }
         }
     }
 

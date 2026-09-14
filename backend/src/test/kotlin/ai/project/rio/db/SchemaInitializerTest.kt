@@ -25,10 +25,33 @@ class SchemaInitializerTest {
         Files.deleteIfExists(dbFile)
     }
 
-    private fun storedDdl(): String = jdbc.queryForObject(
+    private fun storedDdl(table: String = "card_transactions"): String = jdbc.queryForObject(
         "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
-        listOf("table", "card_transactions"),
+        listOf("table", table),
     ) { it.getString("sql") }
+
+    @Test
+    fun `fresh schema creates the idempotency tables`() {
+        SchemaInitializer.initialize(jdbc)
+
+        val tables = jdbc.query("SELECT name FROM sqlite_master WHERE type = ? ORDER BY name", listOf("table")) { it.getString("name") }
+        assertEquals(listOf("card_transaction_idempotency", "card_transaction_idempotency_items", "card_transactions"), tables)
+    }
+
+    @Test
+    fun `drift in an idempotency table fails at startup and names the table`() {
+        SchemaInitializer.initialize(jdbc)
+        val changedDdl = storedDdl("card_transaction_idempotency").replace("created_at TEXT NOT NULL", "created_at TEXT NOT NULL, extra TEXT")
+        jdbc.execute("DROP TABLE card_transaction_idempotency_items")
+        jdbc.execute("DROP TABLE card_transaction_idempotency")
+        jdbc.execute(changedDdl)
+
+        val error = assertFailsWith<IllegalStateException> { SchemaInitializer.initialize(jdbc) }
+
+        assertTrue(error.message!!.contains("card_transaction_idempotency"))
+        assertTrue(error.message!!.contains("RIO_DB_PATH"))
+        assertEquals(changedDdl, storedDdl("card_transaction_idempotency"))
+    }
 
     @Test
     fun `fresh schema can be reopened without losing card transactions`() {
