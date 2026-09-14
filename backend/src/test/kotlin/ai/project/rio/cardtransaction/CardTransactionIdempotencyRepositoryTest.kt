@@ -30,7 +30,7 @@ class CardTransactionIdempotencyRepositoryTest {
     fun setUp() {
         dbFile = Files.createTempFile("card-transaction-idempotency-repository-test", ".db")
         jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc)
+        SchemaInitializer.initialize(jdbc, dbFile)
         repository = CardTransactionIdempotencyRepository(jdbc)
     }
 

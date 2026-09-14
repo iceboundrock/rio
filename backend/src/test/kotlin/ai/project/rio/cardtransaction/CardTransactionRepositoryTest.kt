@@ -26,7 +26,7 @@ class CardTransactionRepositoryTest {
     fun setUp() {
         dbFile = Files.createTempFile("card-transaction-repository-test", ".db")
         jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc)
+        SchemaInitializer.initialize(jdbc, dbFile)
         repository = CardTransactionRepository(jdbc)
     }
 

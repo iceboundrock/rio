@@ -61,7 +61,7 @@ class CardTransactionRoutesTest {
     fun setUp() {
         dbFile = Files.createTempFile("card-transaction-routes-test", ".db")
         val jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc)
+        SchemaInitializer.initialize(jdbc, dbFile)
         SchemaInitializer.seedIfEmpty(jdbc)
     }
 

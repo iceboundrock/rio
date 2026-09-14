@@ -29,7 +29,7 @@ fun main() {
 
     dbPath.toAbsolutePath().parent?.toFile()?.mkdirs()
     val jdbc = Database.open(dbPath)
-    SchemaInitializer.initialize(jdbc)
+    SchemaInitializer.initialize(jdbc, dbPath)
     SchemaInitializer.seedIfEmpty(jdbc)
 
     embeddedServer(Netty, port = port) { module(jdbc) }.start(wait = true)
