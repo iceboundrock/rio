@@ -29,8 +29,10 @@ Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`.
 - Money travels over HTTP as an integer string plus currency (see `contracts/AGENTS.md`); `cardtransaction/CardTransactionDtos.kt` converts it to `Money` at the edge, and services and repositories only ever see `Money`.
 - SQLite stores `amount_minor INTEGER` + `currency TEXT`. That row shape must not leak above the repository.
 
-In SQL the currency column is part of every aggregate, comparison and ordering. Global ordering by
-`amount_minor` across currencies is meaningless; scope it by currency or do not offer it.
+In SQL, any aggregate, comparison or ordering that involves `amount_minor` must also involve the
+`currency` column. Ordering or filtering by other columns (`created_at`, `id`, `status`) needs no
+currency scope. Global ordering by `amount_minor` across currencies is meaningless; scope it by
+currency or do not offer it.
 
     -- Bad: mixes USD, EUR and JPY minor units
     SELECT SUM(amount_minor) FROM card_transactions;
