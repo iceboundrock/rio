@@ -1,4 +1,4 @@
-# Repository Rules
+# Repository rules
 
 This repository is optimized for short AI-assisted coding exercises. This file holds only the rules
 that apply to every change. Each major subtree has its own `AGENTS.md` with the rules for that code:

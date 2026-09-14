@@ -1,4 +1,4 @@
-# Contract Rules
+# Contract rules
 
 Applies to `contracts/schemas/`. The root `AGENTS.md` still applies.
 

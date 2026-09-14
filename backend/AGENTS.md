@@ -1,4 +1,4 @@
-# Backend Rules
+# Backend rules
 
 Applies to everything under `backend/`. The root `AGENTS.md` still applies; this file adds the
 Kotlin / Ktor / JDBC rules and the server-side financial-correctness rules.

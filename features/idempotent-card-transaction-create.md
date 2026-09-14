@@ -16,7 +16,7 @@ a retry replay the committed result instead of writing again.
 - Every `POST /api/card-transactions` request carries exactly one `Idempotency-Key` header.
   Opaque, case-sensitive, 1..255 characters, no control characters, not whitespace-only. UUIDs are
   the recommended client value; the server attaches no meaning to it.
-- Missing, blank, malformed, over-long, or repeated header → 400 `VALIDATION_ERROR`
+- A missing, blank, malformed, over-long, or repeated header answers 400 `VALIDATION_ERROR`
   (`missing Idempotency-Key header` / `invalid Idempotency-Key header` /
   `multiple Idempotency-Key headers`). Nothing is persisted and the key is not consumed.
   Caveat: Netty rejects C0 control characters and DEL in any header value while decoding, with its
@@ -48,11 +48,11 @@ a retry replay the committed result instead of writing again.
   The startup drift guard covers all three tables: a file that has `card_transactions` but not the
   idempotency tables predates this feature and is refused with reset instructions, not extended.
 - SQL lives in a new `CardTransactionIdempotencyRepository`; no generic idempotency abstraction.
-- Service flow: validate and normalize every item → compute fingerprint → `transactional { tx -> }`:
-  first statement is `INSERT ... ON CONFLICT(idempotency_key) DO NOTHING`. Claimed → insert the card
-  transactions and the ordered item mapping, commit. Not claimed → load the record; fingerprint or
-  shape differ → throw (rollback) `IdempotencyConflictException`; else load the original transactions
-  in item order and return them.
+- Service flow: validate and normalize every item, compute the fingerprint, then enter
+  `transactional { tx -> }`, whose first statement is `INSERT ... ON CONFLICT(idempotency_key) DO NOTHING`.
+  If the key was claimed, insert the card transactions and the ordered item mapping and commit. If
+  not, load the record; if the fingerprint or shape differ, throw `IdempotencyConflictException`
+  (rolling back); otherwise load the original transactions in item order and return them.
 - Every statement runs on the transaction-bound executor. A batch stays all-or-nothing together
   with its idempotency rows.
 
@@ -62,11 +62,12 @@ a retry replay the committed result instead of writing again.
   currency/type, blank description, non-positive amount, invalid batch item): key not consumed.
 - Transaction rollback for any reason rolls back the claim; the key may be retried.
 - After commit the key is consumed even if the response is lost; the next request replays.
-- No expiry or cleanup: keys live as long as the database file. Reset-only schema evolution.
+- No expiry or cleanup: keys live as long as the database file. The schema evolves by reset only.
 
 ### Concurrency
 
-- The primary key on `idempotency_key` is the only authority. No JVM locks, no ordering assumptions.
+- The primary key on `idempotency_key` is the only authority; there are no JVM locks and no ordering
+  assumptions.
 - Same key + same payload in parallel: one creates, the rest wait on the SQLite writer and replay.
   All success responses carry the same ids; exactly one row set exists.
 - Same key + different payloads in parallel: one wins; the others get 422 and persist nothing.
@@ -93,20 +94,20 @@ a retry replay the committed result instead of writing again.
 
 ## Acceptance Criteria
 
-- [x] POST without `Idempotency-Key` → 400, nothing persisted.
-- [x] Blank / control-character / >255-char / repeated keys → 400, nothing persisted.
-- [x] First single-object POST → 201, exactly one row.
-- [x] Replay with the same key → 201, byte-identical body, no new row.
+- [x] POST without `Idempotency-Key` answers 400 and persists nothing.
+- [x] Blank, control-character, over-255-character or repeated keys answer 400 and persist nothing.
+- [x] The first single-object POST answers 201 and creates exactly one row.
+- [x] A replay with the same key answers 201 with a byte-identical body and no new row.
 - [x] First batch POST creates all items atomically; replay returns the same ids in the same order, no new rows.
-- [x] Object vs one-element array with the same key → 422.
-- [x] Same key, different request → 422 `IDEMPOTENCY_CONFLICT`, no write.
-- [x] Same payload, different keys → distinct rows.
-- [x] JSON whitespace / member order alone → replay, not conflict.
+- [x] An object and a one-element array with the same key answer 422.
+- [x] The same key with a different request answers 422 `IDEMPOTENCY_CONFLICT` and writes nothing.
+- [x] The same payload with different keys creates distinct rows.
+- [x] A change in JSON whitespace or member order alone is a replay, not a conflict.
 - [x] Failed validation does not consume the key; the key then works with a valid request.
 - [x] A rolled-back batch leaves no idempotency record and the key can be retried.
 - [x] Replay works after reopening the same SQLite file with a new service instance.
-- [x] Parallel same-key/same-payload → one logical creation, all successes identical.
-- [x] Parallel same-key/different-payload → only the winner persisted, losers 422.
+- [x] Parallel requests with the same key and payload produce one logical creation, and every success is identical.
+- [x] Parallel requests with the same key and different payloads persist only the winner; the losers get 422.
 - [x] All real HTTP responses still validate against `contracts/schemas`.
 - [x] Frontend sends a fresh key per logical submission, reuses it when the user resubmits the same request after an error, and maps 422 to `ApiError` with code `IDEMPOTENCY_CONFLICT`.
 - [x] README, this spec and the scoped `AGENTS.md` files describe the contract.
