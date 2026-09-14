@@ -38,7 +38,11 @@ for (const file of readdirSync(schemasDir).filter((f) => f.endsWith(".schema.jso
 // reaches it through a root `$ref` before it is exported itself (the first emission is never marked
 // complete). Exporting every schema after the schemas it references avoids the duplicate.
 const exportsById = {};
-for (const id of dependencyOrder(schemas)) exportsById[exportNameFor(schemas.get(id).file)] = id;
+for (const id of dependencyOrder(schemas)) {
+  const name = exportNameFor(schemas.get(id).file);
+  if (name in exportsById) throw new Error(`${schemas.get(id).file}: export name ${name} collides with another schema file`);
+  exportsById[name] = id;
+}
 
 const js = toEsm(standaloneCode(ajv, exportsById));
 const dts = `${HEADER}import type { ValidateFunction } from "ajv";
@@ -108,7 +112,8 @@ function toEsm(code) {
   body = body.replace(/^"use strict";/, "");
   const out = `${HEADER}${imports.join("\n")}\n${body}`;
   for (const forbidden of [/\brequire\(/, /\bnew Function\b/, /\beval\(/]) {
-    if (forbidden.test(out)) throw new Error(`generated code still contains ${forbidden}`);
+    const line = out.split("\n").find((l) => forbidden.test(l));
+    if (line !== undefined) throw new Error(`generated code still contains ${forbidden}: ${line.trim().slice(0, 120)}`);
   }
   return out;
 }

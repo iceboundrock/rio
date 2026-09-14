@@ -12,14 +12,19 @@ echo "==> frontend: npm install"
 (cd frontend && npm install --no-audit --no-fund --loglevel=error)
 
 # The schema validators are generated from contracts/schemas and checked in; a stale artifact means
-# a schema changed without `npm run generate:validators` being run and committed.
+# a schema changed without `npm run generate:validators` being run and its output committed.
+# Compare file contents rather than git status so a regenerated-but-uncommitted artifact passes locally.
 echo "==> frontend: npm run generate:validators (must match the checked-in artifact)"
+generated_before="$(mktemp -d)"
+trap 'rm -rf "$generated_before"' EXIT
+cp frontend/src/api/validators.generated.js frontend/src/api/validators.generated.d.ts "$generated_before/"
 (cd frontend && npm run generate:validators)
-if [ -n "$(git status --porcelain -- frontend/src/api/validators.generated.js frontend/src/api/validators.generated.d.ts)" ]; then
-  echo "error: frontend/src/api/validators.generated.{js,d.ts} are stale; commit the regenerated files" >&2
-  git --no-pager diff --stat -- frontend/src/api/validators.generated.js frontend/src/api/validators.generated.d.ts >&2
-  exit 1
-fi
+for f in validators.generated.js validators.generated.d.ts; do
+  if ! cmp -s "$generated_before/$f" "frontend/src/api/$f"; then
+    echo "error: frontend/src/api/$f was stale (regenerated now); commit the regenerated files" >&2
+    exit 1
+  fi
+done
 
 # --disallow-code-generation-from-strings makes Node throw on eval / new Function, so a validator
 # that quietly went back to runtime compilation fails here instead of in a browser with a strict CSP.
