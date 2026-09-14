@@ -18,4 +18,11 @@ export default defineConfig({
     },
     fs: { allow: [path.resolve(import.meta.dirname, "..")] },
   },
+  preview: {
+    // Serve the production build under the strict policy the app must work with: no 'unsafe-eval',
+    // so the schema validators have to be precompiled (scripts/generate-validators.mjs). The dev
+    // server is exempt because HMR and React Fast Refresh inject inline scripts.
+    headers: { "Content-Security-Policy": "script-src 'self'" },
+    proxy: { "/api": "http://localhost:8080" },
+  },
 });
