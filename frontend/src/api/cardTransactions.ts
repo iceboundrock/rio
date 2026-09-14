@@ -42,25 +42,39 @@ export async function getCardTransaction(id: string): Promise<CardTransaction> {
   return fromJson(json, url);
 }
 
+/**
+ * One key per logical user action (a form submission). Reuse it for any retry of that same action so
+ * the server replays instead of creating again; never mint a new one per transport attempt. A new
+ * submission gets a new key even when its rows equal an earlier one: idempotency is keyed by intent,
+ * not by payload.
+ */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+function idempotencyHeaders(idempotencyKey: string): Record<string, string> {
+  return { "Idempotency-Key": idempotencyKey };
+}
+
 function toJson(input: CreateCardTransactionInput): CreateCardTransactionRequestJson {
   return { description: input.description, amount: moneyToJson(input.amount), type: input.type };
 }
 
-export async function createCardTransaction(input: CreateCardTransactionInput): Promise<CardTransaction> {
+export async function createCardTransaction(input: CreateCardTransactionInput, idempotencyKey: string): Promise<CardTransaction> {
   const body = toJson(input);
   if (!validateCreateCardTransactionRequest(body)) {
     throw new RequestContractError("/api/card-transactions", describeErrors(validateCreateCardTransactionRequest));
   }
-  const json = await postJson("/api/card-transactions", body, validateCardTransaction);
+  const json = await postJson("/api/card-transactions", body, validateCardTransaction, idempotencyHeaders(idempotencyKey));
   return fromJson(json, "/api/card-transactions");
 }
 
 /** Creates every input or none: the server inserts an array body in one transaction. */
-export async function createCardTransactions(inputs: CreateCardTransactionInput[]): Promise<CardTransaction[]> {
+export async function createCardTransactions(inputs: CreateCardTransactionInput[], idempotencyKey: string): Promise<CardTransaction[]> {
   const body = inputs.map(toJson);
   if (!validateCreateCardTransactionsRequest(body)) {
     throw new RequestContractError("/api/card-transactions", describeErrors(validateCreateCardTransactionsRequest));
   }
-  const response = await postJson("/api/card-transactions", body, validateCardTransactionListResponse);
+  const response = await postJson("/api/card-transactions", body, validateCardTransactionListResponse, idempotencyHeaders(idempotencyKey));
   return response.items.map((item) => fromJson(item, "/api/card-transactions"));
 }

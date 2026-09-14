@@ -42,10 +42,11 @@ export async function getJson<TWire>(url: string, validate: ValidateFunction<TWi
   return handleResponse(url, response, validate);
 }
 
-export async function postJson<TWire>(url: string, body: unknown, validate: ValidateFunction<TWire>): Promise<TWire> {
+/** `headers` are request-specific additions (e.g. `Idempotency-Key`); the JSON media types are always set. */
+export async function postJson<TWire>(url: string, body: unknown, validate: ValidateFunction<TWire>, headers: Record<string, string> = {}): Promise<TWire> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   return handleResponse(url, response, validate);

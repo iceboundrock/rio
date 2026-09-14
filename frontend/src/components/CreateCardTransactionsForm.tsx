@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { createCardTransactions } from "../api/cardTransactions";
+import { createCardTransactions, newIdempotencyKey } from "../api/cardTransactions";
 import { describeError } from "../api/errors";
 import { CURRENCIES, MAX_WIRE_AMOUNT, moneyFromDecimalString, type CurrencyCode } from "../money/money";
 import type { CardTransactionType, CreateCardTransactionInput } from "../types/cardTransaction";
@@ -133,8 +133,11 @@ export default function CreateCardTransactionsForm({ onCreated }: { onCreated: (
     setError(null);
     if (inputs === null) return;
     setSubmitting(true);
+    // One key per submission: a second click after an error is a new operation and gets a new key,
+    // while `submitting` keeps one click from becoming two. A retry of this same call would reuse it.
+    const idempotencyKey = newIdempotencyKey();
     try {
-      await createCardTransactions(inputs);
+      await createCardTransactions(inputs, idempotencyKey);
       setRows([emptyRow()]);
       setRowErrors([null]);
       onCreated();
