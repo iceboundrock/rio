@@ -87,24 +87,24 @@ a retry replay the committed result instead of writing again.
 
 ## Acceptance Criteria
 
-- [ ] POST without `Idempotency-Key` → 400, nothing persisted.
-- [ ] Blank / control-character / >255-char / repeated keys → 400, nothing persisted.
-- [ ] First single-object POST → 201, exactly one row.
-- [ ] Replay with the same key → 201, byte-identical body, no new row.
-- [ ] First batch POST creates all items atomically; replay returns the same ids in the same order, no new rows.
-- [ ] Object vs one-element array with the same key → 422.
-- [ ] Same key, different request → 422 `IDEMPOTENCY_CONFLICT`, no write.
-- [ ] Same payload, different keys → distinct rows.
-- [ ] JSON whitespace / member order alone → replay, not conflict.
-- [ ] Failed validation does not consume the key; the key then works with a valid request.
-- [ ] A rolled-back batch leaves no idempotency record and the key can be retried.
-- [ ] Replay works after reopening the same SQLite file with a new service instance.
-- [ ] Parallel same-key/same-payload → one logical creation, all successes identical.
-- [ ] Parallel same-key/different-payload → only the winner persisted, losers 422.
-- [ ] All real HTTP responses still validate against `contracts/schemas`.
-- [ ] Frontend sends a fresh key per submission and maps 422 to `ApiError` with code `IDEMPOTENCY_CONFLICT`.
-- [ ] README, this spec and the scoped `AGENTS.md` files describe the contract.
-- [ ] `./verify.sh` passes.
+- [x] POST without `Idempotency-Key` → 400, nothing persisted.
+- [x] Blank / control-character / >255-char / repeated keys → 400, nothing persisted.
+- [x] First single-object POST → 201, exactly one row.
+- [x] Replay with the same key → 201, byte-identical body, no new row.
+- [x] First batch POST creates all items atomically; replay returns the same ids in the same order, no new rows.
+- [x] Object vs one-element array with the same key → 422.
+- [x] Same key, different request → 422 `IDEMPOTENCY_CONFLICT`, no write.
+- [x] Same payload, different keys → distinct rows.
+- [x] JSON whitespace / member order alone → replay, not conflict.
+- [x] Failed validation does not consume the key; the key then works with a valid request.
+- [x] A rolled-back batch leaves no idempotency record and the key can be retried.
+- [x] Replay works after reopening the same SQLite file with a new service instance.
+- [x] Parallel same-key/same-payload → one logical creation, all successes identical.
+- [x] Parallel same-key/different-payload → only the winner persisted, losers 422.
+- [x] All real HTTP responses still validate against `contracts/schemas`.
+- [x] Frontend sends a fresh key per submission and maps 422 to `ApiError` with code `IDEMPOTENCY_CONFLICT`.
+- [x] README, this spec and the scoped `AGENTS.md` files describe the contract.
+- [x] `./verify.sh` passes.
 
 ## Non-goals
 
