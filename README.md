@@ -10,7 +10,7 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `^22.12.0 || ^24.0.0 || >=26.0.0` (with npm; the intersection of what Vite and Vitest support). No Docker, no external database.
+Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (with npm; only the current LTS line is supported, see #71). No Docker, no external database.
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both
@@ -54,7 +54,7 @@ fails when they do not match the schemas, and runs the frontend tests with Node'
 `main`. CI runs the same script you run locally — there is no separate CI-only test sequence.
 It runs the script once per JDK (Temurin 25, 21 and 17, overriding the toolchain pin through
 the `jdkVersion` Gradle property) on a single Node version — Node only drives the frontend
-toolchain, the React app never runs on it. That version is exactly 22.12.0, the floor of the
+toolchain, the React app never runs on it. That version is exactly 24.21.0, the floor of the
 `engines.node` range in `frontend/package.json`, so a newer-than-floor Node API sneaking into
 the build or test setup fails in CI; local development on a newer Node covers the other end.
 No external services and no secrets: backend tests create temporary SQLite files. When a run

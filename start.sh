@@ -1,6 +1,6 @@
 #!/bin/sh
 # Starts backend (http://localhost:8080) and frontend (http://localhost:5173) together.
-# Ctrl+C stops both. Requires: JDK 25, Node ^22.12.0, ^24.0.0 or >=26.0.0, npm.
+# Ctrl+C stops both. Requires: JDK 25, Node 24 (>=24.21.0, the current LTS), npm.
 set -eu
 
 cd "$(dirname "$0")"
