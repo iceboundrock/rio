@@ -122,15 +122,26 @@ class JsonSchemaAssertionsTest {
     }
 
     /**
-     * The one construct joni reads differently from ECMAScript: its `.` excludes only U+000A, while
-     * `/./u` also excludes U+000D, U+2028 and U+2029. This pins the divergence as it stands so the
-     * guard below is dropped, not forgotten, once the engine agrees with the browser.
+     * The one known construct joni reads differently from ECMAScript: its `.` excludes only U+000A,
+     * while `/./u` also excludes U+000D, U+2028 and U+2029. This pins the divergence as it stands so
+     * the guard below is dropped, not forgotten, once the engine agrees with the browser.
      */
     @Test
     fun `joni dot still accepts CR, LS and PS, unlike ECMAScript`() {
         val dot = schema(".", JsonSchemaAssertions::engine)
         assertViolatesPattern(dot, "\n")
-        for (terminator in listOf("\r", " ", " ")) assertMatchesPattern(dot, terminator)
+        for (terminator in listOf("\r", "\u2028", "\u2029")) assertMatchesPattern(dot, terminator)
+    }
+
+    /**
+     * What a contract writes instead of `.`: the class both engines read the same way. It excludes
+     * exactly the ECMAScript LineTerminator set, so U+0085 (NEL), which `/./u` matches, still matches.
+     */
+    @Test
+    fun `the portable class for dot rejects every ECMAScript line terminator and nothing else`() {
+        val portable = schema(portableDot, JsonSchemaAssertions::registry)
+        for (terminator in listOf("\n", "\r", "\u2028", "\u2029")) assertViolatesPattern(portable, terminator)
+        for (text in listOf("a", "\u0085", ".", " ")) assertMatchesPattern(portable, text)
     }
 
     /** Because of the divergence above, an unescaped `.` outside a class is refused at load, never matched. */
@@ -139,11 +150,15 @@ class JsonSchemaAssertionsTest {
         for (pattern in listOf("a.c", "^.$", "[a].", "\\\\.")) {
             val error = assertFailsWith<IllegalStateException>(pattern) { schema(pattern, JsonSchemaAssertions::registry) }
             assertContains(error.message.orEmpty(), pattern)
+            assertContains(error.message.orEmpty(), portableDot)
         }
         for ((pattern, text) in listOf("a\\.c" to "a.c", "^[.]$" to ".", "^[a.]+$" to "a.a", "\\S" to "x")) {
             assertMatchesPattern(schema(pattern, JsonSchemaAssertions::registry), text)
         }
     }
+
+    /** The regex text `[^\n\r\u2028\u2029]`, as a contract would write it in `pattern`. */
+    private val portableDot = "[^\\n\\r\\u2028\\u2029]"
 
     private fun schema(pattern: String, registry: (Map<String, String>) -> SchemaRegistry): Schema {
         val id = "https://rio.local/schemas/pattern.schema.json"
