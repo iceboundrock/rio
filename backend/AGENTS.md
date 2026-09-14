@@ -3,7 +3,7 @@
 Applies to everything under `backend/`. The root `AGENTS.md` still applies; this file adds the
 Kotlin / Ktor / JDBC rules and the server-side financial-correctness rules.
 
-Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`; the database file is named from the repository root.
+Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`.
 
 ## Architecture
 
@@ -15,7 +15,8 @@ Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`; th
 - Business rules belong in services (`cardtransaction/CardTransactionService.kt`).
 - HTTP translation belongs in routes and `http/ErrorHandling.kt`. Throw `ValidationException` (400) or `NotFoundException` (404).
 - Do not create generic repository hierarchies or interfaces with a single implementation.
-- Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and delete `backend/data/rio.db`. Do not add code to detect or migrate old databases.
+- Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and reset the database file. That file is `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the backend was started from (`backend/data/rio.db` with the README's `cd backend && ./gradlew run`).
+- Keep the startup schema-drift guard in `SchemaInitializer.initialize`: it compares the stored DDL with the current definition and refuses to start with reset instructions, and `SchemaInitializerTest` covers it. Do not add code that migrates an old database or keeps serving it; a mismatch is always a reset.
 
 ## Money
 
