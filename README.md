@@ -92,10 +92,10 @@ features/              one Markdown spec per interview feature
 | POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body | 400, 415 |
 
 Each path in the table also answers 405 for a method it does not route, with an `Allow` header
-listing the methods it does (`GET, POST` for the collection, `GET` for one card transaction);
-`OPTIONS` on those paths returns 204 with the same `Allow`. Any other path, including an unknown
-sub-path such as `/api/card-transactions/{id}/extra`, stays 404 without `Allow`. An unsatisfiable
-`Accept` answers 406 before the route runs.
+listing the methods it supports (`GET, POST, OPTIONS` for the collection, `GET, OPTIONS` for one
+card transaction); `OPTIONS` on those paths returns 204 with the same `Allow`. Any other path,
+including an unknown sub-path such as `/api/card-transactions/{id}/extra`, stays 404 without
+`Allow`. An unsatisfiable `Accept` answers 406 before the route runs.
 
 ```json
 // CardTransaction

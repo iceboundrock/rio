@@ -116,16 +116,18 @@ fun Application.configureErrorHandling() {
 /**
  * Fallback for the methods a resource does not route, declared under the same `route {}` as the ones
  * it does. Ktor's resolver prefers a method-specific sibling to this bare handler when both match and
- * falls through to it otherwise; Ktor itself never sets Allow on the 405 it raises. Allow is read from
- * the sibling method routes per request, so the list cannot drift from what is actually routed.
- * Answers OPTIONS 204 with that list (RFC 9110 9.3.7) and everything else 405 + Allow (15.5.6), the
- * body shaped by the status page.
+ * falls through to it otherwise; Ktor itself never sets Allow on the 405 it raises. Allow lists the
+ * methods the target supports (RFC 9110 10.2.1): the sibling method routes, read per request so the
+ * list cannot drift from what is actually routed, plus OPTIONS, which this handler answers itself.
+ * Answers OPTIONS 204 with that list (9.3.7) and everything else 405 + Allow (15.5.6), the body shaped
+ * by the status page.
  */
 fun Route.methodNotAllowed() {
     val route = this
     handle {
-        val allowed = route.children.mapNotNull { (it.selector as? HttpMethodRouteSelector)?.method }
-        check(allowed.isNotEmpty()) { "methodNotAllowed() must sit beside at least one method route" }
+        val routed = route.children.mapNotNull { (it.selector as? HttpMethodRouteSelector)?.method }
+        check(routed.isNotEmpty()) { "methodNotAllowed() must sit beside at least one method route" }
+        val allowed = routed + HttpMethod.Options
         call.response.header(HttpHeaders.Allow, allowed.joinToString(", ") { it.value })
         if (call.request.local.method == HttpMethod.Options) call.respond(HttpStatusCode.NoContent)
         else call.respond(HttpStatusCode.MethodNotAllowed)

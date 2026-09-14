@@ -15,7 +15,7 @@ import io.ktor.server.routing.route
  * GET  /api/card-transactions/{id}
  * POST /api/card-transactions   one request object -> CardTransaction; array -> { items } (all-or-nothing)
  *
- * Any other method answers 405 (OPTIONS: 204) with Allow listing the methods routed for that path.
+ * Any other method answers 405 (OPTIONS: 204) with Allow listing the methods routed for that path plus OPTIONS.
  * Routes only translate HTTP <-> DTO <-> service call. Errors are mapped in http/ErrorHandling.kt.
  */
 fun Route.cardTransactionRoutes(service: CardTransactionService) {

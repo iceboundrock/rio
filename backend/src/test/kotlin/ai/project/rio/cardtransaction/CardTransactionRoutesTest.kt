@@ -324,10 +324,11 @@ class CardTransactionRoutesTest {
     fun `framework generated statuses carry the shared error shape`() = withRawServer { port ->
         // Routing produces this without throwing, so it never reaches an exception handler and used to
         // answer with an empty body. An unsatisfiable Accept no longer reaches the framework at all.
-        // RFC 9110 15.5.6 requires the Allow header on every 405, listing what the target does route.
+        // RFC 9110 15.5.6 requires the Allow header on every 405, listing the methods the target
+        // supports (10.2.1): the ones it routes plus OPTIONS, which the fallback itself answers.
         val targets = listOf(
-            "/api/card-transactions" to "GET, POST",
-            "/api/card-transactions/seed-0001" to "GET",
+            "/api/card-transactions" to "GET, POST, OPTIONS",
+            "/api/card-transactions/seed-0001" to "GET, OPTIONS",
         )
         for ((target, allow) in targets) {
             val unrouted = listOf("POST", "PUT", "DELETE", "PATCH", "HEAD").filter { it !in allow.split(", ") }
@@ -346,7 +347,7 @@ class CardTransactionRoutesTest {
     @Test
     fun `OPTIONS answers 204 with the target's Allow header`() = withRawServer { port ->
         // RFC 9110 9.3.7: the response to OPTIONS describes the target's communication options.
-        for ((target, allow) in listOf("/api/card-transactions" to "GET, POST", "/api/card-transactions/seed-0001" to "GET")) {
+        for ((target, allow) in listOf("/api/card-transactions" to "GET, POST, OPTIONS", "/api/card-transactions/seed-0001" to "GET, OPTIONS")) {
             val response = rawRequest(port, "OPTIONS $target")
             assertEquals(204, response.status, response.raw)
             assertTrue(response.hasHeader("Allow: $allow"), response.raw)
