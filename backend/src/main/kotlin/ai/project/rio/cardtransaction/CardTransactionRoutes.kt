@@ -1,6 +1,7 @@
 package ai.project.rio.cardtransaction
 
 import ai.project.rio.http.atItemIndex
+import ai.project.rio.http.methodNotAllowed
 import ai.project.rio.http.receiveJson
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.respond
@@ -14,6 +15,7 @@ import io.ktor.server.routing.route
  * GET  /api/card-transactions/{id}
  * POST /api/card-transactions   one request object -> CardTransaction; array -> { items } (all-or-nothing)
  *
+ * Any other method answers 405 (OPTIONS: 204) with Allow listing the methods routed for that path plus OPTIONS.
  * Routes only translate HTTP <-> DTO <-> service call. Errors are mapped in http/ErrorHandling.kt.
  */
 fun Route.cardTransactionRoutes(service: CardTransactionService) {
@@ -24,9 +26,13 @@ fun Route.cardTransactionRoutes(service: CardTransactionService) {
             call.respond(CardTransactionListResponse(items))
         }
 
-        get("/{id}") {
-            val id = call.parameters["id"]!!
-            call.respond(service.get(id).toDto())
+        route("/{id}") {
+            get {
+                val id = call.parameters["id"]!!
+                call.respond(service.get(id).toDto())
+            }
+
+            methodNotAllowed()
         }
 
         post {
@@ -43,5 +49,7 @@ fun Route.cardTransactionRoutes(service: CardTransactionService) {
                 }
             }
         }
+
+        methodNotAllowed()
     }
 }

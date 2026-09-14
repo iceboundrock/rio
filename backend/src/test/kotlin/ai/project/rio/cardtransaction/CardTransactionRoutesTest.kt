@@ -324,12 +324,46 @@ class CardTransactionRoutesTest {
     fun `framework generated statuses carry the shared error shape`() = withRawServer { port ->
         // Routing produces this without throwing, so it never reaches an exception handler and used to
         // answer with an empty body. An unsatisfiable Accept no longer reaches the framework at all.
-        for (method in listOf("PUT", "DELETE", "PATCH")) {
-            val response = rawRequest(port, "$method /api/card-transactions")
-            assertEquals(405, response.status, response.raw)
-            assertTrue(response.hasHeader("Vary: Accept"), response.raw)
-            assertMatchesSchema(response.body, "api-error.schema.json")
-            assertEquals("method not allowed", response.message())
+        // RFC 9110 15.5.6 requires the Allow header on every 405, listing the methods the target
+        // supports (10.2.1): the ones it routes plus OPTIONS, which the fallback itself answers.
+        val targets = listOf(
+            "/api/card-transactions" to "GET, POST, OPTIONS",
+            "/api/card-transactions/seed-0001" to "GET, OPTIONS",
+        )
+        for ((target, allow) in targets) {
+            val unrouted = listOf("POST", "PUT", "DELETE", "PATCH", "HEAD").filter { it !in allow.split(", ") }
+            for (method in unrouted) {
+                val response = rawRequest(port, "$method $target")
+                assertEquals(405, response.status, response.raw)
+                assertTrue(response.hasHeader("Allow: $allow"), response.raw)
+                assertTrue(response.hasHeader("Vary: Accept"), response.raw)
+                if (method == "HEAD") continue // no body on HEAD, whatever the status
+                assertMatchesSchema(response.body, "api-error.schema.json")
+                assertEquals("method not allowed", response.message())
+            }
+        }
+    }
+
+    @Test
+    fun `OPTIONS answers 204 with the target's Allow header`() = withRawServer { port ->
+        // RFC 9110 9.3.7: the response to OPTIONS describes the target's communication options.
+        for ((target, allow) in listOf("/api/card-transactions" to "GET, POST, OPTIONS", "/api/card-transactions/seed-0001" to "GET, OPTIONS")) {
+            val response = rawRequest(port, "OPTIONS $target")
+            assertEquals(204, response.status, response.raw)
+            assertTrue(response.hasHeader("Allow: $allow"), response.raw)
+            assertEquals("", response.body, response.raw)
+        }
+    }
+
+    @Test
+    fun `the method fallback does not claim paths the resource does not route`() = withRawServer { port ->
+        // A bare handler under a route is a candidate only when the whole path is consumed, so an
+        // unknown sub-path stays 404, without an Allow header, rather than becoming a 405 or 204.
+        for (method in listOf("GET", "PUT", "OPTIONS")) {
+            val response = rawRequest(port, "$method /api/card-transactions/seed-0001/extra")
+            assertEquals(404, response.status, response.raw)
+            assertTrue(response.head.lineSequence().none { it.startsWith("Allow:", ignoreCase = true) }, response.raw)
+            assertEquals("no matching route", response.message())
         }
     }
 
