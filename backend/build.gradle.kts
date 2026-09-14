@@ -25,8 +25,9 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
-    // Draft 2020-12 validation of HTTP bodies against ../contracts/schemas. joni is networknt's
-    // ECMA-262 regex engine, so `pattern` reads as it does in Ajv rather than as java.util.regex.
+    // Draft 2020-12 validation of HTTP bodies against ../contracts/schemas. joni backs networknt's
+    // ECMAScript regex factory, so `pattern` reads as Ajv does for the constructs the contracts use;
+    // it is not a full ECMA-262 engine, and JsonSchemaAssertions refuses the known divergence (#68).
     testImplementation("com.networknt:json-schema-validator:3.0.7")
     testImplementation("org.jruby.joni:joni:2.2.6")
 }

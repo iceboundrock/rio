@@ -20,13 +20,17 @@ import kotlin.test.fail
  * Every *.schema.json file in that directory is registered under its `$id`
  * (https://rio.local/schemas/<file>), so `$ref`s between files resolve locally. Remote fetching is
  * off, so a `$ref` that resolves to nothing is an error, never a pass. `pattern` is matched by joni
- * in ECMAScript mode, the dialect the schema means and Ajv uses in the browser; the one construct
- * joni gets wrong, an unescaped `.`, is refused at load (see [refuseBareDots]).
- * JsonSchemaAssertionsTest is the proof that each keyword, and each cross-file reference, bites.
+ * in networknt's ECMAScript mode. That is not a full ECMA-262 engine: it agrees with Ajv on the
+ * constructs the contracts use, and the one known divergence, an unescaped `.`, is refused at load
+ * (see [refuseBareDots]). JsonSchemaAssertionsTest is the proof that each keyword, each cross-file
+ * reference and each pattern construct bites; a construct new to the contracts needs a case there.
  */
 object JsonSchemaAssertions {
 
     private const val SCHEMA_ID_PREFIX = "https://rio.local/schemas/"
+
+    /** The regex text `[^\n\r\u2028\u2029]`: ECMAScript's `.` written as a class both engines agree on. */
+    private const val PORTABLE_DOT = "[^\\n\\r\\u2028\\u2029]"
 
     private val schemasDir: Path = Path.of(
         System.getProperty("contracts.schemas.dir")
@@ -64,16 +68,17 @@ object JsonSchemaAssertions {
      * joni's `.` excludes only U+000A where ECMAScript's `/./u` also excludes U+000D, U+2028 and
      * U+2029 (pinned in JsonSchemaAssertionsTest), so a `pattern` with an unescaped `.` outside a
      * character class could pass here and fail in the browser. No contract uses one; this keeps it
-     * that way until the engine agrees with Ajv (#68). Escaped `\.` and `.` inside `[...]` are literal
-     * in both engines and are allowed.
+     * that way until the engine agrees with Ajv (#68). The pattern is never rewritten: the author
+     * writes `[^\n\r\u2028\u2029]`, which both engines read the same way. Escaped `\.` and `.`
+     * inside `[...]` are literal in both engines and are allowed.
      */
     private fun refuseBareDots(id: String, node: Any?) {
         when (node) {
             is Map<*, *> -> node.forEach { (key, value) ->
                 if (key == "pattern" && value is String) check(!hasBareDot(value)) {
-                    "$id: pattern $value has an unescaped `.`, which joni reads differently from Ajv; use an explicit class instead"
+                    "$id: pattern $value has an unescaped `.`, which joni reads differently from Ajv; write $PORTABLE_DOT instead"
                 }
-                if (key == "patternProperties" && value is Map<*, *>) value.keys.forEach { check(!hasBareDot(it as String)) { "$id: patternProperties key $it has an unescaped `.`" } }
+                if (key == "patternProperties" && value is Map<*, *>) value.keys.forEach { check(!hasBareDot(it as String)) { "$id: patternProperties key $it has an unescaped `.`; write $PORTABLE_DOT instead" } }
                 refuseBareDots(id, value)
             }
             is List<*> -> node.forEach { refuseBareDots(id, it) }
