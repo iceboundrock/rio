@@ -5,6 +5,7 @@ import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
 import com.networknt.schema.InputFormat
 import com.networknt.schema.SchemaException
 import com.networknt.schema.SchemaLocation
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 
@@ -133,14 +134,17 @@ class JsonSchemaAssertionsTest {
 
     /**
      * Remote fetching is off, so a `$ref` the registry cannot resolve is an error, never a pass.
+     * The target is a real file: with networknt's opt-in `fetchRemoteResources()` this `file:` ref
+     * would load and validate, so the test pins the fetcher being off, not merely a missing target.
      * networknt resolves references lazily, so the error surfaces on the first validation.
      */
     @Test
     fun `an unresolvable ref is an error instead of validating anything`() {
         val id = "https://rio.local/schemas/broken.schema.json"
-        val registry = JsonSchemaAssertions.registry(mapOf(id to """{"${'$'}ref":"https://rio.local/schemas/nope.schema.json"}"""))
+        val onDisk = Path.of(System.getProperty("contracts.schemas.dir")).resolve("money.schema.json").toUri()
+        val registry = JsonSchemaAssertions.registry(mapOf(id to """{"${'$'}ref":"$onDisk"}"""))
         assertFailsWith<SchemaException> {
-            registry.getSchema(SchemaLocation.of(id)).validate("{}", InputFormat.JSON)
+            registry.getSchema(SchemaLocation.of(id)).validate(money, InputFormat.JSON)
         }
     }
 }
