@@ -1,6 +1,6 @@
 #!/bin/sh
 # Starts backend (http://localhost:8080) and frontend (http://localhost:5173) together.
-# Ctrl+C stops both. Requires: JDK 25, Node 24 (>=24.21.0, the current LTS), npm.
+# Ctrl+C stops both. Requires: JDK 25, Node 24 (>=24.21.0, the current LTS), pnpm (see README.md).
 set -eu
 
 cd "$(dirname "$0")"
@@ -25,19 +25,19 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 if [ ! -d frontend/node_modules ]; then
-  echo "==> frontend: npm install"
-  (cd frontend && npm install --no-audit --no-fund --loglevel=error)
+  echo "==> frontend: pnpm install"
+  (cd frontend && pnpm install --loglevel=error)
 fi
 
 echo "==> backend: ./gradlew run   (http://localhost:8080)"
 (cd backend && exec ./gradlew run --quiet --console=plain) &
 BACKEND_PID=$!
 
-echo "==> frontend: npm run dev    (http://localhost:5173)"
-(cd frontend && exec npm run dev) &
+echo "==> frontend: pnpm run dev   (http://localhost:5173)"
+(cd frontend && exec pnpm run dev) &
 FRONTEND_PID=$!
 
-# A pid plus all of its descendants (npm -> sh -> vite). The backend's java is a child
+# A pid plus all of its descendants (pnpm -> sh -> vite). The backend's java is a child
 # of the Gradle daemon, not of gradlew; the daemon kills it when the gradlew client dies.
 tree() {
   for c in $(pgrep -P "$1" 2>/dev/null); do tree "$c"; done

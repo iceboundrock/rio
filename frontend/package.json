@@ -3,17 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@12.4.1",
   "engines": {
     "node": ">=24.21.0 <25.0.0"
   },
   "scripts": {
     "dev": "vite",
     "generate:validators": "node scripts/generate-validators.mjs",
-    "prebuild": "npm run generate:validators",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/generate-validators.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "pretest": "npm run generate:validators",
-    "test": "vitest",
+    "test": "node scripts/generate-validators.mjs && vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

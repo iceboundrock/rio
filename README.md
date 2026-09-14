@@ -10,7 +10,7 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (with npm; only the current LTS line is supported, see #71). No Docker, no external database.
+Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74). No Docker, no external database.
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both
@@ -26,8 +26,8 @@ cd backend
 
 # Terminal 2 — frontend on http://localhost:5173 (proxies /api to :8080)
 cd frontend
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 Open http://localhost:5173 — it redirects to `/card-transactions`.
@@ -36,14 +36,14 @@ Open http://localhost:5173 — it redirects to `/card-transactions`.
 
 ```bash
 cd backend && ./gradlew test          # Money, JdbcTemplate, repository, and route tests (schema-validated)
-cd frontend && npm test -- --run      # Money helpers + schema validation with the shared schemas
-cd frontend && npm run build          # typecheck + production build
-cd frontend && npm run preview        # serve the build under Content-Security-Policy: script-src 'self' (backend on :8080)
+cd frontend && pnpm test --run        # Money helpers + schema validation with the shared schemas
+cd frontend && pnpm run build         # typecheck + production build
+cd frontend && pnpm run preview       # serve the build under Content-Security-Policy: script-src 'self' (backend on :8080)
 ./verify.sh                           # all of the above, from the repo root
 ```
 
-`npm test` and `npm run build` first regenerate `frontend/src/api/validators.generated.{js,d.ts}` from
-`contracts/schemas` (`npm run generate:validators`). The generated files are checked in; `./verify.sh`
+`pnpm test` and `pnpm run build` first regenerate `frontend/src/api/validators.generated.{js,d.ts}` from
+`contracts/schemas` (`pnpm run generate:validators`). The generated files are checked in; `./verify.sh`
 fails when they do not match the schemas, and runs the frontend tests with Node's
 `--disallow-code-generation-from-strings` so any return to runtime schema compilation (`eval` /
 `new Function`, which a strict CSP forbids) fails there instead of in a browser.
