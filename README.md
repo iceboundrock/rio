@@ -180,8 +180,9 @@ Media-type matching is case-insensitive and accepts parameters such as `charset=
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
 Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, database, and UI.
-If an existing local database predates this currency set, stop the backend and delete
-`backend/data/rio.db` (or your configured `RIO_DB_PATH`) before restarting. This resets local
+If an existing local database predates this currency set, stop the backend and delete the database
+file before restarting: `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the
+backend was started from (`backend/data/rio.db` with the commands above). This resets local
 card transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
 Startup checks the stored table DDL against the current definition and stops with reset instructions
 if they differ, before serving requests. The check normalizes SQLite's `CREATE TABLE` prefix and
@@ -301,5 +302,5 @@ interview exercises; see `features/README.md`.
 
 | Variable       | Default          | Meaning                      |
 |----------------|------------------|------------------------------|
-| `RIO_DB_PATH` | `data/rio.db`   | SQLite file (relative to `backend/`) |
+| `RIO_DB_PATH` | `data/rio.db`   | SQLite file; the default is relative to the directory the backend is started from (`backend/` with the commands above) |
 | `PORT`         | `8080`           | Backend HTTP port            |
