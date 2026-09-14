@@ -1,6 +1,7 @@
 package ai.project.rio.contract
 
 import ai.project.rio.http.JsonSyntax
+import com.alibaba.fastjson2.JSON
 import com.networknt.schema.InputFormat
 import com.networknt.schema.Schema
 import com.networknt.schema.SchemaLocation
@@ -19,7 +20,8 @@ import kotlin.test.fail
  * Every *.schema.json file in that directory is registered under its `$id`
  * (https://rio.local/schemas/<file>), so `$ref`s between files resolve locally. Remote fetching is
  * off, so a `$ref` that resolves to nothing is an error, never a pass. `pattern` is matched by joni
- * in ECMAScript mode, the dialect the schema means and Ajv uses in the browser.
+ * in ECMAScript mode, the dialect the schema means and Ajv uses in the browser; the one construct
+ * joni gets wrong, an unescaped `.`, is refused at load (see [refuseBareDots]).
  * JsonSchemaAssertionsTest is the proof that each keyword, and each cross-file reference, bites.
  */
 object JsonSchemaAssertions {
@@ -42,7 +44,13 @@ object JsonSchemaAssertions {
     private val cache = HashMap<String, Schema>()
 
     /** A Draft 2020-12 registry over `schemas` (absolute `$id` to text), configured as the oracle is. */
-    internal fun registry(schemas: Map<String, String>): SchemaRegistry =
+    internal fun registry(schemas: Map<String, String>): SchemaRegistry {
+        schemas.forEach { (id, text) -> refuseBareDots(id, JSON.parse(text)) }
+        return engine(schemas)
+    }
+
+    /** [registry] without [refuseBareDots]; only for pinning what the engine itself does with a pattern. */
+    internal fun engine(schemas: Map<String, String>): SchemaRegistry =
         SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12) { builder ->
             builder.schemas(schemas)
             builder.schemaRegistryConfig(
@@ -51,6 +59,40 @@ object JsonSchemaAssertions {
                     .build(),
             )
         }
+
+    /**
+     * joni's `.` excludes only U+000A where ECMAScript's `/./u` also excludes U+000D, U+2028 and
+     * U+2029 (pinned in JsonSchemaAssertionsTest), so a `pattern` with an unescaped `.` outside a
+     * character class could pass here and fail in the browser. No contract uses one; this keeps it
+     * that way until the engine agrees with Ajv (#68). Escaped `\.` and `.` inside `[...]` are literal
+     * in both engines and are allowed.
+     */
+    private fun refuseBareDots(id: String, node: Any?) {
+        when (node) {
+            is Map<*, *> -> node.forEach { (key, value) ->
+                if (key == "pattern" && value is String) check(!hasBareDot(value)) {
+                    "$id: pattern $value has an unescaped `.`, which joni reads differently from Ajv; use an explicit class instead"
+                }
+                if (key == "patternProperties" && value is Map<*, *>) value.keys.forEach { check(!hasBareDot(it as String)) { "$id: patternProperties key $it has an unescaped `.`" } }
+                refuseBareDots(id, value)
+            }
+            is List<*> -> node.forEach { refuseBareDots(id, it) }
+        }
+    }
+
+    private fun hasBareDot(pattern: String): Boolean {
+        var inClass = false
+        var i = 0
+        while (i < pattern.length) {
+            when (pattern[i++]) {
+                '\\' -> i++
+                '[' -> inClass = true
+                ']' -> inClass = false
+                '.' -> if (!inClass) return true
+            }
+        }
+        return false
+    }
 
     fun readSchema(fileName: String): String = Files.readString(schemasDir.resolve(fileName))
 

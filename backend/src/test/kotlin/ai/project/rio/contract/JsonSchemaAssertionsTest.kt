@@ -2,12 +2,18 @@ package ai.project.rio.contract
 
 import ai.project.rio.contract.JsonSchemaAssertions.assertMatchesSchema
 import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
+import com.alibaba.fastjson2.JSON
 import com.networknt.schema.InputFormat
+import com.networknt.schema.Schema
 import com.networknt.schema.SchemaException
 import com.networknt.schema.SchemaLocation
+import com.networknt.schema.SchemaRegistry
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * The oracle must agree with Ajv in the browser. These cases are every keyword the contracts use,
@@ -114,6 +120,42 @@ class JsonSchemaAssertionsTest {
         assertViolatesSchema(request("\"Lunch\"" to "\"\u00A0\u2003\u3000\""), "create-card-transaction-request.schema.json")
         assertMatchesSchema(request("\"Lunch\"" to "\"\\u001C\""), "create-card-transaction-request.schema.json")
     }
+
+    /**
+     * The one construct joni reads differently from ECMAScript: its `.` excludes only U+000A, while
+     * `/./u` also excludes U+000D, U+2028 and U+2029. This pins the divergence as it stands so the
+     * guard below is dropped, not forgotten, once the engine agrees with the browser.
+     */
+    @Test
+    fun `joni dot still accepts CR, LS and PS, unlike ECMAScript`() {
+        val dot = schema(".", JsonSchemaAssertions::engine)
+        assertViolatesPattern(dot, "\n")
+        for (terminator in listOf("\r", " ", " ")) assertMatchesPattern(dot, terminator)
+    }
+
+    /** Because of the divergence above, an unescaped `.` outside a class is refused at load, never matched. */
+    @Test
+    fun `a contract pattern with an unescaped dot is refused at load`() {
+        for (pattern in listOf("a.c", "^.$", "[a].", "\\\\.")) {
+            val error = assertFailsWith<IllegalStateException>(pattern) { schema(pattern, JsonSchemaAssertions::registry) }
+            assertContains(error.message.orEmpty(), pattern)
+        }
+        for ((pattern, text) in listOf("a\\.c" to "a.c", "^[.]$" to ".", "^[a.]+$" to "a.a", "\\S" to "x")) {
+            assertMatchesPattern(schema(pattern, JsonSchemaAssertions::registry), text)
+        }
+    }
+
+    private fun schema(pattern: String, registry: (Map<String, String>) -> SchemaRegistry): Schema {
+        val id = "https://rio.local/schemas/pattern.schema.json"
+        val schema = """{"type":"string","pattern":${JSON.toJSONString(pattern)}}"""
+        return registry(mapOf(id to schema)).getSchema(SchemaLocation.of(id))
+    }
+
+    private fun assertMatchesPattern(schema: Schema, text: String) =
+        assertTrue(schema.validate(JSON.toJSONString(text), InputFormat.JSON).isEmpty(), "expected ${JSON.toJSONString(text)} to match")
+
+    private fun assertViolatesPattern(schema: Schema, text: String) =
+        assertFalse(schema.validate(JSON.toJSONString(text), InputFormat.JSON).isEmpty(), "expected ${JSON.toJSONString(text)} to violate")
 
     /** JSON.parse alone accepts these; the browser's JSON.parse does not, so neither may the oracle. */
     @Test
