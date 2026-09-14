@@ -18,13 +18,17 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
-    // JSON for HTTP bodies (main) and JSON Schema validation of responses (tests).
+    // JSON for HTTP bodies.
     implementation("com.alibaba.fastjson2:fastjson2:2.0.65")
     implementation("org.xerial:sqlite-jdbc:3.53.4.0")
     implementation("ch.qos.logback:logback-classic:1.6.3")
 
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
+    // Draft 2020-12 validation of HTTP bodies against ../contracts/schemas. joni is networknt's
+    // ECMA-262 regex engine, so `pattern` reads as it does in Ajv rather than as java.util.regex.
+    testImplementation("com.networknt:json-schema-validator:3.0.7")
+    testImplementation("org.jruby.joni:joni:2.2.6")
 }
 
 // Toolchain JDK. Local builds pin 25; CI overrides via ORG_GRADLE_PROJECT_jdkVersion to
