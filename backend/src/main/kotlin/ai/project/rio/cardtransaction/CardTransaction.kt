@@ -20,6 +20,12 @@ data class CardTransaction(
     val createdAt: Instant,
 )
 
+/**
+ * Whether a create request was one object or an array of them. The two answer with different
+ * response shapes, so the shape is part of what an Idempotency-Key identifies.
+ */
+enum class RequestShape { ONE, MANY }
+
 /** What a caller supplies to create a card transaction; the service assigns id, status, and createdAt. */
 data class NewCardTransaction(
     val description: String,

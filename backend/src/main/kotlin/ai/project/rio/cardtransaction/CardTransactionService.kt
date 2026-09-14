@@ -29,6 +29,10 @@ import java.util.UUID
  * has only read wait for the writer, but a transaction that read first and then wants to write can
  * fail with SQLITE_BUSY instead of waiting; claiming first means a concurrent caller blocks on the
  * winner's commit and then sees its row. A rollback for any reason takes the claim with it.
+ *
+ * A replay pays for that too: the no-op claim still opens a write transaction, so replays serialize
+ * with creates. That is what makes a replay read the winner's committed rows and never a partial
+ * state; do not replace the claim with a SELECT fast path.
  */
 class CardTransactionService(
     jdbc: JdbcTemplate,

@@ -973,9 +973,9 @@ class CardTransactionRoutesTest {
     /**
      * Values the Ktor client refuses to send: blank lines, control characters, and a repeated field
      * line. Whitespace around a field value is not part of it (RFC 9110 5.5), so a blank line arrives
-     * as an empty key. Netty rejects a control character in any header value before Ktor sees the
-     * request, with its own plain-text 400; the route's own check is what a less strict engine would
-     * hit, so those cases assert the status and the absent side effect only.
+     * as an empty key. Netty rejects a C0 control character or DEL in any header value before Ktor
+     * sees the request, with its own plain-text 400, so those cases assert the status and the absent
+     * side effect only; a C1 control (NEL) passes Netty and exercises the route's own check.
      */
     @Test
     fun `raw blank, control-character and repeated Idempotency-Key headers are 400`() = withRawServer { port ->
@@ -986,6 +986,7 @@ class CardTransactionRoutesTest {
             listOf("Idempotency-Key:   \t  ") to "invalid Idempotency-Key header",
             listOf("Idempotency-Key: a\u007Fb") to null,
             listOf("Idempotency-Key: a\u0001b") to null,
+            listOf("Idempotency-Key: a\u0085b") to "invalid Idempotency-Key header",
             listOf("Idempotency-Key: one", "Idempotency-Key: two") to "multiple Idempotency-Key headers",
             listOf("Idempotency-Key: same", "Idempotency-Key: same") to "multiple Idempotency-Key headers",
         )

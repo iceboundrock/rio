@@ -63,9 +63,14 @@ class CardTransactionIdempotencyRepositoryTest {
 
     @Test
     fun `keys are case-sensitive and opaque`() {
-        assertTrue(repository.claim("Key", "fp", RequestShape.ONE, now))
-        assertTrue(repository.claim("key", "fp", RequestShape.ONE, now))
-        assertTrue(repository.claim("a, b", "fp", RequestShape.ONE, now))
+        assertTrue(repository.claim("Key", "fp-1", RequestShape.ONE, now))
+        assertTrue(repository.claim("key", "fp-2", RequestShape.MANY, now))
+        assertTrue(repository.claim("a, b", "fp-3", RequestShape.ONE, now))
+
+        assertEquals(IdempotencyRecord("Key", "fp-1", RequestShape.ONE), repository.find("Key"))
+        assertEquals(IdempotencyRecord("key", "fp-2", RequestShape.MANY), repository.find("key"))
+        assertEquals(IdempotencyRecord("a, b", "fp-3", RequestShape.ONE), repository.find("a, b"))
+        assertNull(repository.find("a"))
     }
 
     @Test

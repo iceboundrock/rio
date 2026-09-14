@@ -136,7 +136,10 @@ POST requires exactly one `Idempotency-Key` header: an opaque, case-sensitive va
 with no control characters and not blank (a UUID per submission is the recommended client value). It is
 checked before the body: a missing header is 400 `missing Idempotency-Key header`, a blank, over-long or
 control-character value is 400 `invalid Idempotency-Key header`, two field lines are 400
-`multiple Idempotency-Key headers`, and none of these consume the key. The key names one logical create
+`multiple Idempotency-Key headers`, and none of these consume the key. One caveat: the HTTP engine (Netty)
+rejects a C0 control character or DEL in any header value while decoding the request, before any route
+runs, with its own plain-text 400 rather than the `ApiError` shape; the route's check is what catches the
+remaining control characters (C1, such as U+0085). The key names one logical create
 operation, not a payload: it exists so a client that never saw the `201` can retry safely.
 
 - **First use**: the request is processed as described above and answered `201`.
@@ -197,7 +200,9 @@ The selected semantics (RFC 9110 §12.5.1):
   because the produced type carries no parameter a range could select between.
 
 The 406 body is itself the JSON `ApiError` shape even though the caller said it would not accept JSON;
-there is no empty error response anywhere in the API. Because every outcome depends on `Accept`,
+there is no empty error response anywhere in the API. The one response not in that shape comes from the
+HTTP engine rather than the API: a request whose headers Netty cannot decode (a control character in a
+field value, for instance) gets Netty's plain-text 400 before Ktor sees it. Because every outcome depends on `Accept`,
 every response carries `Vary: Accept` (§12.5.5), so a shared cache cannot reuse a stored JSON body
 for a request the server would reject.
 

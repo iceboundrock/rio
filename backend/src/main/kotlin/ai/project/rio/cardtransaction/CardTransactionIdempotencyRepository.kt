@@ -3,9 +3,6 @@ package ai.project.rio.cardtransaction
 import ai.project.rio.db.JdbcExecutor
 import java.time.Instant
 
-/** Whether the create request body was one object or an array; the two answer with different shapes. */
-enum class RequestShape { ONE, MANY }
-
 /** What was committed under an Idempotency-Key: enough to tell a replay from a different request. */
 data class IdempotencyRecord(val idempotencyKey: String, val requestFingerprint: String, val requestShape: RequestShape)
 
@@ -47,10 +44,13 @@ class CardTransactionIdempotencyRepository(private val jdbc: JdbcExecutor) {
 
     /** Records the created card transactions in request order; `item_index` is the list position. */
     fun insertItems(idempotencyKey: String, cardTransactionIds: List<String>) {
-        jdbc.batchUpdate(
+        val counts = jdbc.batchUpdate(
             "INSERT INTO card_transaction_idempotency_items (idempotency_key, item_index, card_transaction_id) VALUES (?, ?, ?)",
             cardTransactionIds.mapIndexed { index, id -> listOf(idempotencyKey, index, id) },
         )
+        check(counts.size == cardTransactionIds.size && counts.all { it == 1 }) {
+            "expected one row per card transaction id, got ${counts.toList()}"
+        }
     }
 
     fun findCardTransactionIds(idempotencyKey: String): List<String> =

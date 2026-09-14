@@ -19,6 +19,8 @@ a retry replay the committed result instead of writing again.
 - Missing, blank, malformed, over-long, or repeated header → 400 `VALIDATION_ERROR`
   (`missing Idempotency-Key header` / `invalid Idempotency-Key header` /
   `multiple Idempotency-Key headers`). Nothing is persisted and the key is not consumed.
+  Caveat: Netty rejects C0 control characters and DEL in any header value while decoding, with its
+  own plain-text 400, before Ktor runs; the route's check covers C1 controls and everything else.
 - First valid use of a key: create as today, answer 201 with the existing representation.
 - Same key + same logical request after commit: answer 201 with the *same* representation (same ids,
   `createdAt`, order); insert nothing. No replay indicator, no 200.
