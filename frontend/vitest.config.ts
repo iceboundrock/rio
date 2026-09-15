@@ -13,6 +13,11 @@ export default mergeConfig(
       // the Vite process: jsdom test files go through Vite's client transform, whose import lexer
       // decodes specifiers with eval and silently mis-parses every import when that is disabled.
       execArgv: ["--disallow-code-generation-from-strings"],
+      // Vitest normally unwraps `exports.default` of a CommonJS dependency for a default import.
+      // Browsers (through Vite's pre-bundle and production bundle) and plain Node do not: the
+      // default import is `module.exports` itself. Load dependencies the way the browser does, so a
+      // generated validator that only works under vitest's interop fails here, not in the browser.
+      deps: { interopDefault: false },
     },
   }),
 );
