@@ -99,18 +99,25 @@ function exportNameFor(file) {
  * Ajv's ESM standalone output still loads its runtime helpers with `require(...)`, which does not
  * exist in the browser. Rewrite those to imports and refuse anything else that needs a CommonJS
  * loader or dynamic code generation, so the artifact cannot silently regress the CSP goal.
+ *
+ * The helpers are CommonJS modules that set `exports.default`. What a default import of such a
+ * module yields depends on the loader: vitest unwraps `__esModule` modules to `exports.default`,
+ * while Vite's browser pre-bundle and plain Node hand back `module.exports` itself. Unwrap at the
+ * use site so every loader ends up with the helper function.
  */
 function toEsm(code) {
   const imports = [];
+  const unwraps = [];
   let body = code.replace(
     /const (\w+) = require\("(ajv\/dist\/runtime\/\w+)"\)\.default;/g,
     (_, name, mod) => {
-      imports.push(`import ${name} from "${mod}.js";`);
+      imports.push(`import ${name}Module from "${mod}.js";`);
+      unwraps.push(`const ${name} = ${name}Module.__esModule ? ${name}Module.default : ${name}Module;`);
       return "";
     },
   );
   body = body.replace(/^"use strict";/, "");
-  const out = `${HEADER}${imports.join("\n")}\n${body}`;
+  const out = `${HEADER}${[...imports, ...unwraps].join("\n")}\n${body}`;
   for (const forbidden of [/\brequire\(/, /\bnew Function\b/, /\beval\(/]) {
     const line = out.split("\n").find((l) => forbidden.test(l));
     if (line !== undefined) throw new Error(`generated code still contains ${forbidden}: ${line.trim().slice(0, 120)}`);

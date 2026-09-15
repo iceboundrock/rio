@@ -1,6 +1,7 @@
 // GENERATED FILE - DO NOT EDIT.
 // Built from contracts/schemas/*.schema.json by scripts/generate-validators.mjs (pnpm run generate:validators).
-import func1 from "ajv/dist/runtime/ucs2length.js";
+import func1Module from "ajv/dist/runtime/ucs2length.js";
+const func1 = func1Module.__esModule ? func1Module.default : func1Module;
 
 export const validateApiError = validate20;
 const schema31 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://rio.local/schemas/api-error.schema.json","title":"ApiError","type":"object","additionalProperties":false,"required":["code","message"],"properties":{"code":{"type":"string","enum":["VALIDATION_ERROR","NOT_FOUND","INTERNAL_ERROR","IDEMPOTENCY_CONFLICT"]},"message":{"type":"string"}}};
