@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { NetworkError } from "../api/client";
 import { createCardTransactions } from "../api/cardTransactions";
 import { CreateCardTransactionsFormView, emptyRow, submissionFor, validateRows, type FormRow, type Submission } from "./CreateCardTransactionsForm";
 
@@ -116,7 +117,7 @@ describe("submissionFor", () => {
     vi.stubGlobal("fetch", fetch);
 
     let pending: Submission | null = submissionFor(null, inputsOf([lunch]));
-    await expect(createCardTransactions(pending.inputs, pending.idempotencyKey)).rejects.toBeInstanceOf(TypeError);
+    await expect(createCardTransactions(pending.inputs, pending.idempotencyKey)).rejects.toBeInstanceOf(NetworkError);
 
     // The user clicks Create again with the draft untouched.
     pending = submissionFor(pending, inputsOf([lunch]));

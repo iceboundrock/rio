@@ -1,7 +1,22 @@
-// Generic HTTP + contract handling. Every API call goes: fetch -> status check -> parse -> schema validate.
+// Generic HTTP + contract handling. Every API call goes: fetch (NetworkError if it never completes) -> status check -> parse -> schema validate.
 
 import type { ValidateFunction } from "ajv";
 import { describeErrors, validateApiError } from "./schemas";
+
+/**
+ * `fetch` itself rejected: no response arrived (backend down, DNS, CORS, connection dropped). The
+ * request may or may not have reached the server. This is the only place a fetch rejection is
+ * classified, so a TypeError thrown by later code stays a bug report rather than a network report.
+ */
+export class NetworkError extends Error {
+  constructor(
+    readonly url: string,
+    cause: unknown,
+  ) {
+    super(`Request to ${url} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "NetworkError";
+  }
+}
 
 /** The server answered with a non-2xx status and (normally) the shared ApiError body. */
 export class ApiError extends Error {
@@ -38,18 +53,26 @@ export class RequestContractError extends Error {
 }
 
 export async function getJson<TWire>(url: string, validate: ValidateFunction<TWire>): Promise<TWire> {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const response = await send(url, { headers: { Accept: "application/json" } });
   return handleResponse(url, response, validate);
 }
 
 /** `headers` are request-specific additions (e.g. `Idempotency-Key`); the JSON media types are always set. */
 export async function postJson<TWire>(url: string, body: unknown, validate: ValidateFunction<TWire>, headers: Record<string, string> = {}): Promise<TWire> {
-  const response = await fetch(url, {
+  const response = await send(url, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   return handleResponse(url, response, validate);
+}
+
+async function send(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (cause) {
+    throw new NetworkError(url, cause);
+  }
 }
 
 async function handleResponse<TWire>(url: string, response: Response, validate: ValidateFunction<TWire>): Promise<TWire> {
