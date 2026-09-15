@@ -40,7 +40,7 @@ would each have to re-invent the wiring. There was also no way to create several
 - `CardTransactionService` now takes `JdbcTemplate` instead of a repository. Breaking for callers; this is a learning project with no compatibility requirement.
 - The request body serializer reads the JSON tree to tell object from array, then decodes that tree from its *text* again.
   Only kotlinx's streaming decoder annotates `MissingFieldException` with the JSON path, which `ErrorHandling.kt` turns into
-  `[1].amount.currency`; decoding the tree directly would report a bare `currency`. The cost is that the body is parsed twice.
+  `[1].amount.currency`; decoding the tree directly would report a bare `currency`. Cost: the body is parsed twice.
 - Validation happens inside the transaction, per item, so a bad item N rolls back inserts 1..N-1 without a separate pre-pass.
 - The list page re-fetches after a successful create instead of merging the returned items: the server assigns `createdAt` and the order.
 - Only the newest fetch may set the list state (`pages/latestRequest.ts`): the initial GET can still be in flight when the
