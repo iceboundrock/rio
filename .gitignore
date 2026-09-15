@@ -13,6 +13,7 @@ frontend/dist/
 # Editors / OS
 .idea/
 .vscode/
+.kotlin/
 *.iml
 .DS_Store
 .gradle/
