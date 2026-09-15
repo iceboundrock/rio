@@ -1,4 +1,4 @@
-// Generic HTTP + contract handling. Every API call goes: fetch (NetworkError if it never completes) -> status check -> parse -> schema validate.
+// Generic HTTP + contract handling. Every API call goes: fetch (NetworkError if it never completes) -> read body (ResponseBodyError if the connection drops) -> status check -> parse -> schema validate.
 
 import type { ValidateFunction } from "ajv";
 import { describeErrors, validateApiError } from "./schemas";
@@ -15,6 +15,22 @@ export class NetworkError extends Error {
   ) {
     super(`Request to ${url} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
     this.name = "NetworkError";
+  }
+}
+
+/**
+ * The server answered with a status, but reading the body rejected: the connection dropped mid-stream.
+ * Loaders report this as their own TypeError ("Failed to fetch", "terminated"), so `handleResponse` is the
+ * only place a `response.text()` rejection is classified; nothing else turns a TypeError into a network report.
+ */
+export class ResponseBodyError extends Error {
+  constructor(
+    readonly url: string,
+    readonly status: number,
+    cause: unknown,
+  ) {
+    super(`Reading the HTTP ${status} response from ${url} failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "ResponseBodyError";
   }
 }
 
@@ -76,7 +92,7 @@ async function send(url: string, init: RequestInit): Promise<Response> {
 }
 
 async function handleResponse<TWire>(url: string, response: Response, validate: ValidateFunction<TWire>): Promise<TWire> {
-  const text = await response.text();
+  const text = await readBody(url, response);
   let json: unknown;
   try {
     json = JSON.parse(text);
@@ -92,4 +108,12 @@ async function handleResponse<TWire>(url: string, response: Response, validate: 
 
   if (!validate(json)) throw new ApiContractError(url, describeErrors(validate));
   return json;
+}
+
+async function readBody(url: string, response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch (cause) {
+    throw new ResponseBodyError(url, response.status, cause);
+  }
 }
