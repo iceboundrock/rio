@@ -54,7 +54,7 @@ Anything a task produces that is not code (design docs, specs, plans, research n
 
 - Write non-code artifacts in English (see the Language rule above).
 - Post the artifact as a comment on the relevant issue. If the work has no issue yet, create one first; if the artifact is about changes already under review, post it to the PR instead.
-- Post the full content, not a summary or a file path. Several child repos keep planning notes in gitignored local directories (for example `__ref__/plan/` in `ltbase.api`, see #497); a local working copy is fine, but it is invisible to everyone else and does not survive the branch.
+- Post the full content, not a summary or a file path. Several child repos keep planning notes in gitignored local directories; a local working copy is fine, but it is invisible to everyone else and does not survive the branch.
 - Do not force-add gitignored planning files to make them shareable. The issue comment is the sharing mechanism.
 - Say in the comment which artifact it is and where the working copy lives, so a later reader knows whether they are looking at a plan, a spec, or a review.
 - Anything that must become a durable repository convention still belongs in that repo's `docs/` (an ADR, runbook, or reference page). The issue comment records the thinking; `docs/` records the decision.
