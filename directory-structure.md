@@ -2,7 +2,8 @@
 
 Where code lives in this repository, what belongs in each directory, and how to decide where a new
 file goes. Read it together with the `AGENTS.md` of the subtree you are editing: those files hold the
-coding rules, this file holds the placement rules.
+coding rules, this file holds the placement rules. The `AGENTS.md` files are authoritative: where
+this file and one of them disagree, the `AGENTS.md` rule holds and this file has a bug.
 
 Where a rule's firmness is not obvious it carries a tag; an untagged statement describes the code
 as it is today or restates a rule from an `AGENTS.md` or the README. The tags:
@@ -105,8 +106,8 @@ cardtransaction/
 Points to take from it:
 
 - Files are flat inside the feature. There is no `model/`, `dto/`, `route/` or other sub-package,
-  and none should be introduced for a feature of this size. (Convention; README "Where things are"
-  documents the same layout.)
+  and none should be introduced. (Convention, root `AGENTS.md`; README "Where things are"
+  documents the same layout. Whether a size threshold ever changes this is tracked in #79.)
 - A feature may own more than one Repository and more than one helper. Anything only this feature
   uses stays in its package, even if the concept sounds generic: the idempotency repository is
   deliberately "the card-transaction create's own bookkeeping, not a generic idempotency store".
@@ -146,8 +147,10 @@ Points to take from it:
   single-statement reads use a repository built from that template in a property initializer.
   (Convention, required by `backend/AGENTS.md`.)
 - The chain is Route -> Service -> Repository. The Service is the only thing a Route calls, and
-  the only thing that constructs the feature's Repositories. It never sees DTOs; Routes convert
-  before calling it.
+  the only production code that constructs the feature's Repositories, with one exception:
+  `db/SchemaInitializer.seedIfEmpty` builds `CardTransactionRepository` to insert the demo rows
+  (see "Shared and infrastructure code"). The Service never sees DTOs; Routes convert before
+  calling it.
 
 ### Repository
 
@@ -197,8 +200,9 @@ guard, and the seed rows).
 
 - `JdbcTemplate` "must not learn about Money or any domain type". (Convention, `backend/AGENTS.md`.)
 - `TransactionalService` lives here, not in a feature, even though its name says "Service": it knows
-  only JDBC and is the base class every writing service extends. (Exception to "services live in
-  features", deliberate.)
+  only JDBC and is the base class for services that own multi-statement writes (`backend/AGENTS.md`
+  "Transactions"); a service that only reads, or writes one row, does not need it. (Exception to
+  "services live in features", deliberate.)
 - `SchemaInitializer` is the one shared file that imports a feature: it holds the `CREATE TABLE`
   statements for every table, including the feature's, and seeds through
   `CardTransactionRepository`. Table DDL is therefore centralized in `db/`, not feature-local.
@@ -217,12 +221,13 @@ converter), `JsonRequest` (`receiveJson`), `JsonSyntax` (RFC 8259 check),
 - Every application-defined exception that becomes an HTTP status is declared in `http/ApiError.kt`
   and mapped in `http/ErrorHandling.kt`, even one raised by a single feature
   (`IdempotencyConflictException`). The trade-off chosen here is one place for the exception ->
-  status table. This is today's pattern, not a settled rule for a second feature; see
-  "Uncertainties". (Likely: one instance.)
+  status table. (Convention, root `AGENTS.md`. Whether a second feature keeps its exception there
+  is a revisit tracked in #79; until then this is the rule, see "Uncertainties".)
 - `http/ErrorHandling.kt` also maps exceptions and statuses the application does not define: Ktor's
   `BadRequestException`, `UnsupportedMediaTypeException` and `CannotTransformContentToTypeException`,
   and the bodiless 404 / 405 / 406 statuses that routing and content negotiation raise, so every
-  Ktor-produced error still carries the `ApiError` shape. Netty can reject a request before Ktor
+  Ktor-produced error response that has a body carries the `ApiError` shape (a `HEAD` response has
+  none whatever its status, by HTTP semantics). Netty can reject a request before Ktor
   runs (C0 control characters in a header value) with its own plain-text 400; that is outside this
   mapping and outside any project file.
 - `http/` imports nothing from features, `db/` or `money/`. (Convention, verified from imports.)
@@ -349,7 +354,7 @@ Build-time tooling only (`generate-validators.mjs`). Never imported by `src/`.
 | Request/response DTO and its mapping | `<feature>/<Feature>Dtos.kt` | Mirror the schema in `contracts/schemas/` exactly |
 | Feature-local helper (fingerprint, parser, policy) | the feature package, `<Feature><Concern>.kt` | Keep it there while it carries feature knowledge; promote only mechanics that belong to no feature |
 | New table DDL or seed rows | `db/SchemaInitializer.kt` | Centralized on purpose; reset the DB file, no migrations |
-| New application exception that maps to an HTTP status | `http/ApiError.kt` + a handler in `http/ErrorHandling.kt` | Today's pattern; feature-local placement for a second feature is open (see "Uncertainties") |
+| New application exception that maps to an HTTP status | `http/ApiError.kt` + a handler in `http/ErrorHandling.kt` | Root `AGENTS.md` rule; revisiting it for a second feature is tracked in #79 |
 | JDBC or transaction mechanics | `db/` | Must not learn domain types |
 | JSON / content negotiation / header parsing | `http/` | Must not import features |
 | Money arithmetic, rounding, currency | `money/` | No parallel money representation |
@@ -385,8 +390,8 @@ Build-time tooling only (`generate-validators.mjs`). Never imported by `src/`.
 6. Put the feature's `CREATE TABLE` statements and any seed rows in `db/SchemaInitializer.kt`
    (append to `TABLES` in dependency order). There are no migrations; a local database is reset.
 7. If the Service writes more than one row, extend `db/TransactionalService`. If it raises a new
-   kind of HTTP-visible error, follow today's pattern: declare the exception in `http/ApiError.kt`
-   and map it in `http/ErrorHandling.kt` (the feature-local alternative is open, see "Uncertainties").
+   kind of HTTP-visible error, declare the exception in `http/ApiError.kt` and map it in
+   `http/ErrorHandling.kt` (root `AGENTS.md`; the revisit is tracked in #79).
 8. Wire it in `Application.module()`: construct the Service from `jdbc`, then call
    `<feature>Routes(service)` inside `routing { }`.
 9. Add tests under `src/test/kotlin/ai/project/rio/<feature>/`: `<Feature>RepositoryTest`,
@@ -408,12 +413,14 @@ See "Backend feature structure". The representative feature is `cardtransaction/
 
 The frontend is organized by kind of module, not by feature. A feature such as "card transactions"
 is spread across `api/cardTransactions.ts`, `types/cardTransaction.ts`,
-`pages/CardTransaction*Page.tsx` and `components/CardTransaction*.tsx`, tied together by the name
-prefix. A new resource follows the same spread: one endpoint module, one types file, pages,
-components. (Likely: one resource so far; whether a second resource keeps this spread is not
-decided, see "Uncertainties".) Until the maintainer decides otherwise, do not introduce
-`src/features/<name>/` folders; there is no example of that shape and it would split the `api/`
-boundary that `frontend/AGENTS.md` relies on.
+`pages/CardTransactionListPage.tsx`, `pages/CardTransactionDetailsPage.tsx`,
+`components/CardTransactionList.tsx`, `components/CardTransactionRow.tsx` and
+`components/CreateCardTransactionsForm.tsx`: files are named after the resource, but no prefix is
+prescribed and no folder groups them. A new resource follows the same spread: one endpoint module,
+one types file, pages, components. (Convention: the root `AGENTS.md` frontend rules place every
+file by kind.) Do not introduce `src/features/<name>/` folders; there is no example of that shape
+and it would split the `api/` boundary that `frontend/AGENTS.md` relies on. Whether a second
+resource changes this layout is a revisit tracked in #79.
 
 ### Contracts
 
@@ -496,17 +503,20 @@ subtree.
   `money/` tests sit in their packages. (Convention.)
 - All kinds share one source set and are told apart by file. `<Feature>RoutesTest` is API tests
   through the real Ktor pipeline (`testApplication { application { module(Database.open(dbFile)) } }`),
-  every application-generated JSON response schema-validated (a bodiless response such as the 204
-  to `OPTIONS` is asserted on status and headers). `<Feature>ServiceTest` is service integration
+  every application-generated JSON response schema-validated (a bodiless response, the 204 to
+  `OPTIONS` or any `HEAD` response, is asserted on status and headers). `<Feature>ServiceTest` is service integration
   tests over a temporary SQLite file with a fixed `Clock`, including rollback and concurrency.
   `<Feature>RepositoryTest` is SQL round-trips. `MoneyTest`, `JsonSyntaxTest` and
   `CardTransactionRequestFingerprintTest` are pure unit tests. There is no separate integration or
   e2e source set. (Convention.)
 - Real components only. A test whose class touches the database opens `Database.open` on
-  `Files.createTempFile(...)`, runs `SchemaInitializer.initialize` and deletes the file in
-  `@AfterTest`; a pure test (`MoneyTest`, `JsonSyntaxTest`, `CardTransactionRequestFingerprintTest`)
-  needs no database. No mocking library and no mocks; behaviour that depends on transaction
-  semantics is tested through the database. (Convention, `backend/AGENTS.md`.)
+  `Files.createTempFile(...)` and deletes the file in `@AfterTest`. A test that exercises the
+  application schema (the feature tests, `SchemaInitializerTest`) runs `SchemaInitializer.initialize`;
+  a `db/` mechanics test creates the minimal table it needs instead (`JdbcTemplateTest`,
+  `TransactionalServiceTest` and their `items` table). A pure test (`MoneyTest`, `JsonSyntaxTest`,
+  `CardTransactionRequestFingerprintTest`) needs no database. No mocking library and no mocks;
+  behaviour that depends on transaction semantics is tested through the database. (Convention,
+  `backend/AGENTS.md`.)
 - The test-only package `contract/` holds the one shared test utility, `JsonSchemaAssertions.kt`
   (the schema oracle), its own tests, and cross-layer contract invariants that belong to no
   production package (`CurrencyContractTest`: the schema's currency enum equals the backend
@@ -569,7 +579,7 @@ Only what affects where a file goes and how it is found.
 4. Only if the code is JDBC mechanics, HTTP/JSON mechanics or money arithmetic with no feature
    knowledge does it go to `db/`, `http/` or `money/`; caller count is not the test. Table DDL
    always goes to `db/SchemaInitializer.kt`; application exceptions that map to an HTTP status go
-   to `http/ApiError.kt` today (see "Uncertainties").
+   to `http/ApiError.kt` (root `AGENTS.md`).
 5. Before adding a new kind of file or a sub-package, check `cardtransaction/`: if it has no such
    thing, the feature probably does not need it either.
 6. Before adding a new package under `ai.project.rio`, confirm that neither a feature package nor
@@ -603,7 +613,7 @@ feature gets a spec in `features/` before code.
   depends on a feature package. Intentional; extend it for new tables.
 - `http/ApiError.kt` holds a feature-specific exception. `IdempotencyConflictException` exists
   for one endpoint but lives with the other HTTP exceptions so `ErrorHandling.kt` has one status
-  table. Intentional for now (see "Uncertainties").
+  table. Intentional, and the rule for the next one too (root `AGENTS.md`); see "Uncertainties".
 - There are two Gradle roots. The top-level `settings.gradle.kts` (`rio-monorepo`) includes
   `:rio-backend`; the backend also has its own `settings.gradle.kts` and wrapper, and every script
   and document builds from `backend/`. Harmless, but new Gradle configuration goes in
@@ -613,17 +623,18 @@ feature gets a spec in `features/` before code.
 
 ## Uncertainties
 
-- Cross-feature dependencies are untested by example. With one feature, no rule about feature A
-  importing feature B can be read from the code. The guidance in "Dependency rules" (depend on the
-  other feature's Service, not its Repository or Dtos) follows from the feature-first decision and
-  should be confirmed by the maintainer when the second feature lands.
-- Where a second feature's HTTP-mapped exception goes is open. Today the answer is `http/ApiError.kt`
-  because that is where the only such exception is, but it means `http/` accumulates knowledge of
-  every feature's failure modes. A maintainer may prefer feature-local exception classes with
-  handlers still registered in `http/ErrorHandling.kt`.
-- Whether a feature package should ever get sub-packages is open. `cardtransaction/` is flat with seven
-  files. Nothing in the repository says at what size a `model/` split would be acceptable; until
-  the maintainer says otherwise, stay flat.
-- The by-kind frontend layout has one resource in it. Whether a second resource keeps the same
-  spread or the maintainer wants feature folders is not decided; this document records the current
-  pattern only.
+Every rule above is in force as written. This section records where the code behind a rule is
+thin, so a reader knows which rules the maintainer expects to revisit when a second feature or
+resource lands. The revisits are tracked in #79; until one is decided, the current rule applies.
+
+- Cross-feature dependencies have no example. With one feature, no rule about feature A importing
+  feature B can be read from the code, and no `AGENTS.md` states one. The guidance in "Dependency
+  rules" (depend on the other feature's Service, not its Repository or Dtos) follows from the
+  feature-first decision and is the only item here that is guidance rather than a rule.
+- HTTP-mapped exceptions go in `http/ApiError.kt` (root `AGENTS.md`). The cost is that `http/`
+  accumulates knowledge of every feature's failure modes; the maintainer may later prefer
+  feature-local exception classes with handlers still registered in `http/ErrorHandling.kt`.
+- Feature packages are flat (root `AGENTS.md`). `cardtransaction/` has seven files; nothing says
+  at what size, if any, a `model/` split would become acceptable.
+- The frontend is laid out by kind (root `AGENTS.md`) with one resource in it. The maintainer may
+  later prefer feature folders for a second resource.

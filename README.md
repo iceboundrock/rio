@@ -249,11 +249,10 @@ Service                 cardtransaction/CardTransactionService.kt    (business r
   ↓
 Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction; takes a JdbcExecutor)
   ↓
-JdbcExecutor            db/JdbcExecutor.kt   (query, queryOne, update, ...; the standalone JdbcTemplate below, or the
-                        transaction-bound executor that `transactional { tx -> }` hands to the block)
-  ↓
-JdbcTemplate            db/JdbcTemplate.kt   (prepare, bind, map, close; one connection per standalone call, or one
-                        connection for a whole withTransaction block)
+JdbcExecutor            db/JdbcExecutor.kt   (query, queryOne, update, ...: prepare, bind, map, close). Two implementations,
+                        both in db/JdbcTemplate.kt: the standalone JdbcTemplate (one connection per call) and the
+                        transaction-bound executor that `transactional { tx -> }` hands to the block (one connection
+                        for the whole block). The repository cannot tell which one it was given.
   ↓
 SQLite                  backend/data/rio.db
 ```
