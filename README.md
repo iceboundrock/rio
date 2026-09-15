@@ -314,8 +314,7 @@ its API rather than prescribing new implementation structure.
 ## Not implemented on purpose
 
 Search, filtering, sorting, pagination, categories, edit/delete, accounts, balances, transfers,
-spending limits, fees, FX, auth, migrations, concurrency control beyond the `Idempotency-Key` claim. These are the
-interview exercises; see `features/README.md`.
+spending limits, fees, FX, auth, migrations, concurrency control beyond the `Idempotency-Key` claim. See `features/README.md`.
 
 ## Configuration
 

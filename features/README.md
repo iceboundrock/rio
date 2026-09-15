@@ -1,6 +1,6 @@
 # Features
 
-Each interview work item gets one Markdown file in this directory. The file is the shared
+Each work item gets one Markdown file in this directory. The file is the shared
 human/AI surface: agree on it first, then implement against it. Keep specs short and concrete.
 
 Suggested naming:
