@@ -9,7 +9,7 @@ Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`.
 
 - Ktor only; do not introduce Spring.
 - Plain JDBC only; do not introduce an ORM, Exposed, jOOQ, or a DI container.
-- Keep the layering explicit: Route -> Service -> Repository -> JdbcTemplate -> SQLite.
+- Keep the layering explicit: Route -> Service -> Repository -> JdbcExecutor -> SQLite. The executor is a standalone `JdbcTemplate` or the transaction-bound executor inside `transactional { tx -> }`; a repository takes `JdbcExecutor`, never `JdbcTemplate`.
 - SQL lives in concrete repositories (`cardtransaction/CardTransactionRepository.kt`). Always bind values with `?` parameters; never interpolate.
 - `db/JdbcTemplate.kt` handles JDBC mechanics only. It must not learn about Money or any domain type.
 - Business rules belong in services (`cardtransaction/CardTransactionService.kt`).

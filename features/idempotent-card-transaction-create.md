@@ -16,7 +16,8 @@ a retry replay the committed result instead of writing again.
 - Every `POST /api/card-transactions` request carries exactly one `Idempotency-Key` header.
   Opaque, case-sensitive, 1..255 characters, no control characters, not whitespace-only. UUIDs are
   the recommended client value; the server attaches no meaning to it.
-- A missing, blank, malformed, over-long, or repeated header answers 400 `VALIDATION_ERROR`
+- A request with a missing, blank, malformed, over-long, or repeated header receives a 400
+  `VALIDATION_ERROR` response
   (`missing Idempotency-Key header` / `invalid Idempotency-Key header` /
   `multiple Idempotency-Key headers`). Nothing is persisted and the key is not consumed.
   Caveat: Netty rejects C0 control characters and DEL in any header value while decoding, with its
@@ -94,8 +95,8 @@ a retry replay the committed result instead of writing again.
 
 ## Acceptance Criteria
 
-- [x] POST without `Idempotency-Key` answers 400 and persists nothing.
-- [x] Blank, control-character, over-255-character or repeated keys answer 400 and persist nothing.
+- [x] A POST without `Idempotency-Key` receives 400 and nothing is persisted.
+- [x] A blank, control-character, over-255-character or repeated key receives 400 and nothing is persisted.
 - [x] The first single-object POST answers 201 and creates exactly one row.
 - [x] A replay with the same key answers 201 with a byte-identical body and no new row.
 - [x] First batch POST creates all items atomically; replay returns the same ids in the same order, no new rows.

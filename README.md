@@ -97,8 +97,8 @@ features/              one Markdown spec per interview feature
 
 ## API
 
-| Method | Path                          | Success                              | Errors   |
-|--------|-------------------------------|--------------------------------------|----------|
+| Method | Path                          | Success                              | Resource-specific errors |
+|--------|-------------------------------|--------------------------------------|--------------------------|
 | GET    | `/api/card-transactions`      | 200 `{ "items": [CardTransaction] }` | none     |
 | GET    | `/api/card-transactions/{id}` | 200 `CardTransaction`                | 404      |
 | POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body; requires `Idempotency-Key` | 400, 415, 422 |

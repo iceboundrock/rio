@@ -4,7 +4,8 @@ Where code lives in this repository, what belongs in each directory, and how to 
 file goes. Read it together with the `AGENTS.md` of the subtree you are editing: those files hold the
 coding rules, this file holds the placement rules.
 
-Each rule below is tagged with how firmly it is established:
+Where a rule's firmness is not obvious it carries a tag; an untagged statement describes the code
+as it is today or restates a rule from an `AGENTS.md` or the README. The tags:
 
 - Decision: confirmed by the maintainer. Holds even where the code has a stray exception.
 - Convention: followed consistently by the code, or required by an `AGENTS.md` / README.
@@ -37,10 +38,10 @@ git-ignored and omitted.
 ├── AGENTS.md                    repository-wide rules; each subtree adds its own AGENTS.md
 ├── CLAUDE.md                    includes AGENTS.md (same pattern in every subtree)
 ├── README.md                    quick start, API reference, "where things are"
+├── directory-structure.md       this file
 ├── settings.gradle.kts          Gradle root that includes :rio-backend from ./backend
 ├── verify.sh                    everything CI runs; start.sh / stop.sh run both servers
 ├── .github/workflows/verify.yml runs ./verify.sh
-├── docs/                        this file
 │
 ├── contracts/
 │   └── schemas/                 <kebab-case>.schema.json, one per HTTP shape
@@ -61,7 +62,7 @@ git-ignored and omitted.
 │       └── test/kotlin/ai/project/rio/
 │           ├── cardtransaction/ mirrors the feature package: <Class>Test.kt per production class
 │           ├── db/  http/  money/
-│           └── contract/        test-only: JsonSchemaAssertions (schema oracle) and its tests
+│           └── contract/        test-only: JsonSchemaAssertions (schema oracle), its tests, cross-layer invariants (CurrencyContractTest)
 │
 └── frontend/
     ├── AGENTS.md
@@ -206,15 +207,24 @@ guard, and the seed rows).
 
 ### `http/`: Ktor and JSON integration
 
-`ApiError` and the exception types that map to HTTP statuses (`ValidationException`,
-`NotFoundException`, `NotAcceptableException`, `IdempotencyConflictException`, `atItemIndex`),
-`ErrorHandling` (StatusPages, Accept validation, `methodNotAllowed`), `JsonConverter` (the fastjson2
-ContentNegotiation converter), `JsonRequest` (`receiveJson`), `JsonSyntax` (RFC 8259 check),
+`ApiError`, the application exception types that map to HTTP statuses (`ValidationException`,
+`NotFoundException`, `NotAcceptableException`, `IdempotencyConflictException`) and the `atItemIndex`
+helper that prefixes a `ValidationException` with the array index, `ErrorHandling` (StatusPages,
+Accept validation, `methodNotAllowed`), `JsonConverter` (the fastjson2 ContentNegotiation
+converter), `JsonRequest` (`receiveJson`), `JsonSyntax` (RFC 8259 check),
 `EcmaScript` (the whitespace set JSON Schema `\S` means).
 
-- Every exception that becomes an HTTP status is declared in `http/ApiError.kt` and mapped in
-  `http/ErrorHandling.kt`, even one raised by a single feature (`IdempotencyConflictException`).
-  The trade-off chosen here is one place for the exception -> status table. (Likely: one instance.)
+- Every application-defined exception that becomes an HTTP status is declared in `http/ApiError.kt`
+  and mapped in `http/ErrorHandling.kt`, even one raised by a single feature
+  (`IdempotencyConflictException`). The trade-off chosen here is one place for the exception ->
+  status table. This is today's pattern, not a settled rule for a second feature; see
+  "Uncertainties". (Likely: one instance.)
+- `http/ErrorHandling.kt` also maps exceptions and statuses the application does not define: Ktor's
+  `BadRequestException`, `UnsupportedMediaTypeException` and `CannotTransformContentToTypeException`,
+  and the bodiless 404 / 405 / 406 statuses that routing and content negotiation raise, so every
+  Ktor-produced error still carries the `ApiError` shape. Netty can reject a request before Ktor
+  runs (C0 control characters in a header value) with its own plain-text 400; that is outside this
+  mapping and outside any project file.
 - `http/` imports nothing from features, `db/` or `money/`. (Convention, verified from imports.)
 
 ### `money/`: shared domain primitives
@@ -267,7 +277,9 @@ All backend tests. Mirrors the main package tree; see "Tests".
 ### `contracts/schemas/`
 
 The HTTP contract: one `<kebab-case>.schema.json` per request, response or shared shape, each with
-`$id` `https://rio.local/schemas/<file>`, `additionalProperties: false` and explicit enums. Copies
+`$id` `https://rio.local/schemas/<file>`. API objects use `additionalProperties: false` and explicit
+enums for every closed set of values (`contracts/AGENTS.md`); a union such as
+`create-card-transactions-request.schema.json` carries neither at its top level. Copies
 of schemas, hand-written validators, header semantics beyond a `description`, and backend or
 frontend code do not go here. For example, a new endpoint response gets
 `card-transaction-receipt.schema.json`; a shape reused by several files (like `money.schema.json`)
@@ -287,7 +299,10 @@ that mirror the JSON exactly, typed re-exports of the generated validators), one
 per resource (`cardTransactions.ts`, which also maps wire -> domain), `errors.ts` (error -> user
 message), and the generated `validators.generated.{js,d.ts}`. React, UI state and hand-edited
 validators do not go here. For example, a `GET /api/accounts` client goes in `src/api/accounts.ts`
-with its wire types added to `schemas.ts`.
+with its wire types added to `schemas.ts`. The one wire type outside this directory is `MoneyJson`
+in `src/money/money.ts`, together with `moneyFromJson` / `moneyToJson`: the money wire shape and its
+conversion stay with the money helpers, and only `src/api/` calls them. (Exception, deliberate:
+`frontend/AGENTS.md` "Money".)
 
 ### `frontend/src/pages/`
 
@@ -298,16 +313,21 @@ parsing and reusable UI do not go here.
 
 ### `frontend/src/components/`
 
-Reusable or presentational UI and forms that receive domain values (`Money` with `bigint`,
-`Date`). A stateful component exports its pure view and logic as named exports
+Reusable or presentational UI and forms. Props are domain values (`Money` with `bigint`, `Date`).
+A form may keep what the user typed as text in its draft state (`FormRow.amount` stays a string
+until submit) and converts it through the money helpers (`moneyFromDecimalString`) before it
+becomes a domain or API input; it never parses wire strings. A stateful component exports its pure
+view and logic as named exports
 (`CreateCardTransactionsFormView`, `validateRows`, `submissionFor`) with the mounted component as
 the default export. `fetch`, wire types and routes do not go here.
 
 ### `frontend/src/money/` and `frontend/src/types/`
 
-`money/money.ts` is the frontend `Money` (bigint + currency) with parsing and formatting; it depends
-on nothing else. `types/` holds the domain types pages and components consume; today one file per
-resource (`cardTransaction.ts`). Wire types do not go in `types/`; they go in `api/schemas.ts`.
+`money/money.ts` is the frontend `Money` (bigint + currency) with parsing, formatting, and the
+`MoneyJson` wire shape with its `moneyFromJson` / `moneyToJson` conversion; it depends on nothing
+else. `types/` holds the domain types pages and components consume; today one file per resource
+(`cardTransaction.ts`). Wire types do not go in `types/`; endpoint wire types go in `api/schemas.ts`
+and the shared money wire type stays in `money.ts`.
 
 ### `frontend/scripts/`
 
@@ -327,26 +347,26 @@ Build-time tooling only (`generate-validators.mjs`). Never imported by `src/`.
 | SQL query or row mapping | `<feature>/<Feature>Repository.kt` (or a second `<Feature><Concern>Repository.kt`) | Concrete class taking `JdbcExecutor`; `?` parameters only |
 | Domain type or enum for a feature | `<feature>/<Feature>.kt` | No `model/` sub-package |
 | Request/response DTO and its mapping | `<feature>/<Feature>Dtos.kt` | Mirror the schema in `contracts/schemas/` exactly |
-| Feature-local helper (fingerprint, parser, policy) | the feature package, `<Feature><Concern>.kt` | Keep it there until a second feature needs it |
+| Feature-local helper (fingerprint, parser, policy) | the feature package, `<Feature><Concern>.kt` | Keep it there while it carries feature knowledge; promote only mechanics that belong to no feature |
 | New table DDL or seed rows | `db/SchemaInitializer.kt` | Centralized on purpose; reset the DB file, no migrations |
-| New exception that maps to an HTTP status | `http/ApiError.kt` + a handler in `http/ErrorHandling.kt` | One place for the status table |
+| New application exception that maps to an HTTP status | `http/ApiError.kt` + a handler in `http/ErrorHandling.kt` | Today's pattern; feature-local placement for a second feature is open (see "Uncertainties") |
 | JDBC or transaction mechanics | `db/` | Must not learn domain types |
 | JSON / content negotiation / header parsing | `http/` | Must not import features |
 | Money arithmetic, rounding, currency | `money/` | No parallel money representation |
 | New backend feature | `ai/project/rio/<feature>/` | See "Adding a new backend feature" |
-| Backend test | `src/test/kotlin/ai/project/rio/<same package>/<Class>Test.kt` | Real SQLite temp file, no mocks |
-| Schema-validation helper for tests | `src/test/.../contract/` | Test-only package |
+| Backend test | `src/test/kotlin/ai/project/rio/<same package>/<Class>Test.kt` | Real components, no mocks; a temporary SQLite file when the class touches the database |
+| Schema oracle or cross-layer contract invariant test | `src/test/.../contract/` | Test-only package |
 | HTTP shape (new or changed) | `contracts/schemas/<kebab-case>.schema.json` | First step of any API change; then DTOs, then wire types |
 | Feature spec | `features/<kebab-case>.md` | Use the template in `features/README.md` |
 | Frontend endpoint function | `frontend/src/api/<resource>.ts` | Only `src/api/` calls `fetch`; map wire -> domain here |
-| Frontend wire type | `frontend/src/api/schemas.ts` | Mirrors the JSON; validators are generated |
+| Frontend wire type | `frontend/src/api/schemas.ts` | Mirrors the JSON; validators are generated. `MoneyJson` is the one exception and stays in `money/money.ts` |
 | Frontend domain type | `frontend/src/types/<resource>.ts` | Uses `Money`, `Date` |
 | Page for a new route | `frontend/src/pages/<Name>Page.tsx` + a `<Route>` in `App.tsx` | Handles loading / error / contract-error / empty |
-| Reusable UI or form | `frontend/src/components/<Name>.tsx` | Receives domain values only |
+| Reusable UI or form | `frontend/src/components/<Name>.tsx` | Receives domain values as props; a form draft may hold the user's text, converted through `money.ts` before submit |
 | Page-only helper | next to the page in `frontend/src/pages/` | e.g. `latestRequest.ts` |
 | Money formatting or parsing (frontend) | `frontend/src/money/money.ts` | bigint only |
 | Frontend test | next to the file as `<name>.test.ts(x)`; DOM-driven tests as `<Name>.interaction.test.tsx` | vitest picks up `src/**/*.test.{ts,tsx}` |
-| Generated code | `frontend/src/api/validators.generated.{js,d.ts}` via `pnpm run generate:validators` | Checked in; never hand-edited |
+| Generated code | `frontend/src/api/validators.generated.{js,d.ts}` via `pnpm run generate:validators` in `frontend/` | Checked in; never hand-edited |
 | Build-time script | `frontend/scripts/` | Not imported by `src/` |
 
 ## Adding a new backend feature
@@ -365,15 +385,17 @@ Build-time tooling only (`generate-validators.mjs`). Never imported by `src/`.
 6. Put the feature's `CREATE TABLE` statements and any seed rows in `db/SchemaInitializer.kt`
    (append to `TABLES` in dependency order). There are no migrations; a local database is reset.
 7. If the Service writes more than one row, extend `db/TransactionalService`. If it raises a new
-   kind of HTTP-visible error, declare the exception in `http/ApiError.kt` and map it in
-   `http/ErrorHandling.kt`.
+   kind of HTTP-visible error, follow today's pattern: declare the exception in `http/ApiError.kt`
+   and map it in `http/ErrorHandling.kt` (the feature-local alternative is open, see "Uncertainties").
 8. Wire it in `Application.module()`: construct the Service from `jdbc`, then call
    `<feature>Routes(service)` inside `routing { }`.
 9. Add tests under `src/test/kotlin/ai/project/rio/<feature>/`: `<Feature>RepositoryTest`,
    `<Feature>ServiceTest`, and `<Feature>RoutesTest` that schema-validates real responses with
    `JsonSchemaAssertions`.
-10. Leave feature-specific helpers in the feature. Promote to `db/`, `http/` or `money/` only when a
-    second feature genuinely needs the same mechanics.
+10. Leave feature-specific helpers in the feature. Promote to `db/`, `http/` or `money/` only code
+    that is pure JDBC, HTTP/JSON or money mechanics with no feature knowledge. That can be true
+    before a second feature exists (`TransactionalService` was extracted with one), and it is never
+    true of code that carries a feature's rules, however reusable its name sounds.
 11. Run `./verify.sh`.
 
 ## Feature and module organization
@@ -388,8 +410,10 @@ The frontend is organized by kind of module, not by feature. A feature such as "
 is spread across `api/cardTransactions.ts`, `types/cardTransaction.ts`,
 `pages/CardTransaction*Page.tsx` and `components/CardTransaction*.tsx`, tied together by the name
 prefix. A new resource follows the same spread: one endpoint module, one types file, pages,
-components. (Convention.) Do not introduce `src/features/<name>/` folders; there is no example of
-that shape and it would split the `api/` boundary that `frontend/AGENTS.md` relies on.
+components. (Likely: one resource so far; whether a second resource keeps this spread is not
+decided, see "Uncertainties".) Until the maintainer decides otherwise, do not introduce
+`src/features/<name>/` folders; there is no example of that shape and it would split the `api/`
+boundary that `frontend/AGENTS.md` relies on.
 
 ### Contracts
 
@@ -425,7 +449,10 @@ Inside a feature, responsibilities flow one way:
 ```
 
 - Allowed: a feature -> `db/`, `http/`, `money/`; `Application.kt` -> anything.
-- Required: Route -> Service -> Repository -> `JdbcTemplate` -> SQLite (`backend/AGENTS.md`).
+- Required: Route -> Service -> Repository -> `JdbcExecutor` -> SQLite (`backend/AGENTS.md`), where
+  the executor is a standalone `JdbcTemplate` or the transaction-bound executor a
+  `transactional { tx -> }` block hands out. A repository constructor takes `JdbcExecutor`, never
+  `JdbcTemplate`; otherwise it cannot be built from `tx` and its statements escape the transaction.
 - Forbidden: `http/` or `money/` importing a feature; `db/JdbcTemplate` importing a domain type;
   a Route calling a Repository; a Repository containing business validation. (Convention, from
   `backend/AGENTS.md` and the code.)
@@ -443,7 +470,7 @@ Inside a feature, responsibilities flow one way:
 ```text
 main.tsx ──> App.tsx ──> pages ──> components, api, types, money
                                    components ──> api, types, money
-                                   api ──> money, types (wire types in api/schemas.ts)
+                                   api ──> money, types (wire types in api/schemas.ts; MoneyJson in money.ts)
                                    types ──> money
                                    money ──> (nothing)
 ```
@@ -469,17 +496,21 @@ subtree.
   `money/` tests sit in their packages. (Convention.)
 - All kinds share one source set and are told apart by file. `<Feature>RoutesTest` is API tests
   through the real Ktor pipeline (`testApplication { application { module(Database.open(dbFile)) } }`),
-  every response schema-validated. `<Feature>ServiceTest` is service integration tests over a
-  temporary SQLite file with a fixed `Clock`, including rollback and concurrency.
+  every application-generated JSON response schema-validated (a bodiless response such as the 204
+  to `OPTIONS` is asserted on status and headers). `<Feature>ServiceTest` is service integration
+  tests over a temporary SQLite file with a fixed `Clock`, including rollback and concurrency.
   `<Feature>RepositoryTest` is SQL round-trips. `MoneyTest`, `JsonSyntaxTest` and
   `CardTransactionRequestFingerprintTest` are pure unit tests. There is no separate integration or
   e2e source set. (Convention.)
-- Real components only: `Database.open` on `Files.createTempFile(...)`,
-  `SchemaInitializer.initialize`, deleted in `@AfterTest`. No mocking library and no mocks;
-  behaviour that depends on transaction semantics is tested through the database.
-  (Convention, `backend/AGENTS.md`.)
-- The only shared test utility is `contract/JsonSchemaAssertions.kt` (the schema oracle) and its
-  own tests, in the test-only package `contract/`. Test data is declared inline in each test class
+- Real components only. A test whose class touches the database opens `Database.open` on
+  `Files.createTempFile(...)`, runs `SchemaInitializer.initialize` and deletes the file in
+  `@AfterTest`; a pure test (`MoneyTest`, `JsonSyntaxTest`, `CardTransactionRequestFingerprintTest`)
+  needs no database. No mocking library and no mocks; behaviour that depends on transaction
+  semantics is tested through the database. (Convention, `backend/AGENTS.md`.)
+- The test-only package `contract/` holds the one shared test utility, `JsonSchemaAssertions.kt`
+  (the schema oracle), its own tests, and cross-layer contract invariants that belong to no
+  production package (`CurrencyContractTest`: the schema's currency enum equals the backend
+  `Currency` set). Test data is declared inline in each test class
   (`lunch`, `cardTransaction(id)`); there is no fixtures directory or shared builder. Keep it that
   way until two test classes actually need the same builder.
 - Tests read `../contracts/schemas` in place via the `contracts.schemas.dir` system property set
@@ -535,9 +566,10 @@ Only what affects where a file goes and how it is found.
    or a feature-local helper (its own `<Feature><Concern>.kt`)?
 3. Do not group code by technical type across features. Two features' routes live in two feature
    packages, never in one `routes/` package.
-4. Only if the code is JDBC mechanics, HTTP/JSON mechanics or money arithmetic that more than one
-   feature needs does it go to `db/`, `http/` or `money/`. Table DDL always goes to
-   `db/SchemaInitializer.kt`; HTTP-mapped exceptions always go to `http/ApiError.kt`.
+4. Only if the code is JDBC mechanics, HTTP/JSON mechanics or money arithmetic with no feature
+   knowledge does it go to `db/`, `http/` or `money/`; caller count is not the test. Table DDL
+   always goes to `db/SchemaInitializer.kt`; application exceptions that map to an HTTP status go
+   to `http/ApiError.kt` today (see "Uncertainties").
 5. Before adding a new kind of file or a sub-package, check `cardtransaction/`: if it has no such
    thing, the feature probably does not need it either.
 6. Before adding a new package under `ai.project.rio`, confirm that neither a feature package nor
@@ -556,7 +588,8 @@ Only what affects where a file goes and how it is found.
 ### Contracts and specs
 
 Any change to an HTTP shape starts in `contracts/schemas/`, then backend DTOs, then frontend wire
-types, then `pnpm run generate:validators`. A new feature gets a spec in `features/` before code.
+types, then `pnpm run generate:validators` in `frontend/` (there is no root `package.json`). A new
+feature gets a spec in `features/` before code.
 
 ## Exceptions and legacy areas
 
