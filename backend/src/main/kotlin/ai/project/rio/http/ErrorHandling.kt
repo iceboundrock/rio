@@ -37,8 +37,10 @@ import io.ktor.server.routing.Route
  *
  * This also installs request-side Accept validation, which can turn a request that would have
  * succeeded into a 400 or a 406. Response shaping and that rejection share this file so they cannot
- * drift: every response, success or error, is application/json, so whether a request can be answered
- * at all is decided from the Accept header alone, before any route runs (see acceptsProducedType).
+ * drift: every response this application writes with a body, success or error, is application/json,
+ * so whether a request can be answered at all is decided from the Accept header alone, before any
+ * route runs (see acceptsProducedType). Netty's own decoding failures answer before Ktor runs and
+ * are outside this file.
  * Because of that every response varies on Accept, and says so.
  */
 fun Application.configureErrorHandling() {
@@ -97,8 +99,9 @@ fun Application.configureErrorHandling() {
             call.respondApiError(status, ApiError(ApiError.NOT_FOUND, "no matching route"))
         }
         // Routing and ContentNegotiation produce these without an exception, so they would otherwise
-        // answer with an empty body and break the "every error is an ApiError" contract. The 405 is
-        // normally raised by methodNotAllowed, which only sets Allow and leaves the body to this page.
+        // answer with an empty body, an application-generated error without the ApiError shape. The
+        // 405 is normally raised by methodNotAllowed, which only sets Allow and leaves the body to
+        // this page.
         status(HttpStatusCode.MethodNotAllowed) { call, status ->
             call.respondApiError(status, ApiError(ApiError.VALIDATION_ERROR, "method not allowed"))
         }

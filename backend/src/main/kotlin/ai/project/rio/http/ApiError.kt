@@ -1,6 +1,11 @@
 package ai.project.rio.http
 
-/** The one error shape every non-2xx API response uses. See contracts/schemas/api-error.schema.json. */
+/**
+ * The shape of every application-generated error response that has a body. See
+ * contracts/schemas/api-error.schema.json. Not every non-2xx response carries one: `HEAD` responses are
+ * bodyless, and a request whose headers Netty cannot decode gets Netty's own plain-text 400 before
+ * Ktor, and therefore ErrorHandling.kt, runs.
+ */
 data class ApiError(val code: String, val message: String) {
     companion object {
         const val VALIDATION_ERROR = "VALIDATION_ERROR"
