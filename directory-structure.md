@@ -5,9 +5,10 @@ implementation behavior, HTTP semantics, contract contents, test coverage, or fe
 criteria. Those concerns have the canonical owners listed below.
 
 The tables describe the placement conventions to follow now. The repository currently has one
-backend business capability and one frontend resource, so they do not establish how the structure
-must scale indefinitely. Decisions that need evidence from another capability or resource are
-tracked in [issue #79](https://github.com/iceboundrock/rio/issues/79).
+backend business capability and one frontend resource. The rules that anticipate a second one were
+decided in [issue #79](https://github.com/iceboundrock/rio/issues/79) without that evidence; if a
+second capability or resource shows one of them to be wrong, open an issue rather than working
+around the rule.
 
 ## Authority
 
@@ -21,7 +22,6 @@ tracked in [issue #79](https://github.com/iceboundrock/rio/issues/79).
 | Application JSON body shapes | `contracts/schemas/*.schema.json` |
 | Current API methods, paths, statuses, and headers | `README.md` under "API" |
 | Work-item requirements and acceptance criteria | the applicable `features/*.md` spec |
-| Unresolved architecture decisions | issue #79 |
 
 Other documents may refer to a rule where context requires it, but they must not become a second
 owner or define divergent policy. Existing source is evidence of a convention, not by itself a rule
@@ -63,15 +63,16 @@ explicit decision.
 | JDBC or SQLite mechanics | `db/` |
 | Table DDL and seed rows | `db/SchemaInitializer.kt` |
 | HTTP, Ktor, or JSON mechanics | `http/` |
-| A current card-transaction application exception exposed as an HTTP error | `http/ApiError.kt`, mapped in `http/ErrorHandling.kt` |
+| An application exception exposed as an HTTP error, for any capability | `http/ApiError.kt`, mapped in `http/ErrorHandling.kt` |
 | Money and currency mechanics | `money/` |
 
-The current capability-package convention is flat. Do not add repository-wide `routes/`,
-`services/`, `repositories/`, or `models/` packages. A capability uses only the files it needs; the
-five `<Feature>*.kt` names above are a naming pattern, not a required one-to-one inventory.
-Additional owned concerns stay in the capability package even when another capability also needs
-them. Whether packages remain flat at a larger size, and how a consumer may depend on the owner,
-are tracked in issue #79.
+Capability packages are flat at every size. Do not add subpackages inside a capability, and do not
+add repository-wide `routes/`, `services/`, `repositories/`, or `models/` packages. A capability
+uses only the files it needs; the five `<Feature>*.kt` names above are a naming pattern, not a
+required one-to-one inventory. A package that has outgrown one owner is split into a second
+capability package, recorded in the work item, never into subpackages. Additional owned concerns
+stay in the capability package even when another capability also needs them; the consumer reaches
+them through the owner's service under the cross-capability rules in `backend/AGENTS.md`.
 
 Feature-agnostic mechanics go to the package named for their responsibility, even when they have
 one current caller. Reuse count does not decide placement. The current tree has no generic
@@ -129,8 +130,13 @@ The browser entry point, route registration, and global stylesheet are currently
 
 `MoneyJson` and its wire/domain conversion remain in `money/money.ts`; this is the current
 placement exception to other wire types living in `api/schemas.ts`. See `frontend/AGENTS.md` for
-the API boundary and test behavior. Issue #79 tracks whether the by-kind layout should change when
-the frontend gains another resource; do not invent a feature-folder layout before that decision.
+the API boundary and test behavior.
+
+A second resource repeats this by-kind spread and carries the resource name in each file name, as
+the `cardTransaction*` and `*CardTransaction*` files do: `api/<resource>.ts`, `types/<resource>.ts`,
+`pages/<Resource>*Page.tsx`, and `components/*<Resource>*.tsx`, with its wire types in
+`api/schemas.ts` and its routes registered in `App.tsx`. Do not introduce a `features/<resource>/`
+or any other per-resource folder layout.
 
 ## Contracts And Specs
 
@@ -151,6 +157,6 @@ Put its DDL and optional seed rows in `db/SchemaInitializer.kt`, then construct 
 register its routes in `Application.kt`. Put its backend tests under the matching `transfer/` test
 package.
 
-This example answers where files go, not how capabilities call each other, share a transaction, or
-place new capability-specific HTTP exceptions. Those decisions have no second-capability evidence
-and remain open in issue #79.
+This example answers where files go. An HTTP error the capability raises follows the exception row
+in the backend table above; calling another capability or running inside its transaction follows
+the cross-capability rules in `backend/AGENTS.md`.
