@@ -132,9 +132,9 @@ The browser entry point, route registration, and global stylesheet are currently
 placement exception to other wire types living in `api/schemas.ts`. See `frontend/AGENTS.md` for
 the API boundary and test behavior.
 
-A second resource repeats this by-kind spread and carries the resource name as its file prefix, as
-the `cardTransaction*` and `CardTransaction*` files do: `api/<resource>.ts`, `types/<resource>.ts`,
-`pages/<Resource>*Page.tsx`, and `components/<Resource>*.tsx`, with its wire types in
+A second resource repeats this by-kind spread and carries the resource name in each file name, as
+the `cardTransaction*` and `*CardTransaction*` files do: `api/<resource>.ts`, `types/<resource>.ts`,
+`pages/<Resource>*Page.tsx`, and `components/*<Resource>*.tsx`, with its wire types in
 `api/schemas.ts` and its routes registered in `App.tsx`. Do not introduce a `features/<resource>/`
 or any other per-resource folder layout.
 
