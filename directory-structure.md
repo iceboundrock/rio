@@ -20,7 +20,7 @@ JSON Schema contract, and the backend and frontend talk only over HTTP.
 
 | Subtree | What it is | How it is organized |
 |---|---|---|
-| `backend/` | Kotlin / Ktor HTTP API over SQLite through plain JDBC | Feature-first. One Kotlin package per business feature; Route, Service, Repository and model responsibilities are files inside that package. Cross-cutting code lives in three shared packages: `db/`, `http/`, `money/`. (Decision) |
+| `backend/` | Kotlin / Ktor HTTP API over SQLite through plain JDBC | Feature-first. One Kotlin package per business feature; Route, Service, Repository and model responsibilities are files inside that package. Code with no feature knowledge lives in three infrastructure packages: `db/`, `http/`, `money/`. (Decision) |
 | `frontend/` | React / TypeScript single-page app (Vite, pnpm) | By kind. `src/api/`, `src/components/`, `src/pages/`, `src/money/`, `src/types/`. It does not mirror the backend's feature packaging. (Convention) |
 | `contracts/schemas/` | JSON Schema (Draft 2020-12) for every HTTP shape | One file per shape. Source of truth for both sides; any API shape change starts here. (Convention) |
 | `features/` | One Markdown spec per feature | Flat directory, one file per feature. (Convention) |
@@ -56,9 +56,9 @@ git-ignored and omitted.
 │       ├── main/kotlin/ai/project/rio/
 │       │   ├── Application.kt   main() and Application.module(): hand wiring, no DI container
 │       │   ├── cardtransaction/ FEATURE: card transactions (see "Backend feature structure")
-│       │   ├── db/              shared: Database, JdbcExecutor, JdbcTemplate, TransactionalService, SchemaInitializer
-│       │   ├── http/            shared: ApiError + exceptions, ErrorHandling, JsonConverter, JsonRequest, JsonSyntax, EcmaScript
-│       │   └── money/           shared domain primitives: Currency, Money, Ratio, MoneyRounding
+│       │   ├── db/              infrastructure: Database, JdbcExecutor, JdbcTemplate, TransactionalService, SchemaInitializer
+│       │   ├── http/            infrastructure: ApiError + exceptions, ErrorHandling, JsonConverter, JsonRequest, JsonSyntax, EcmaScript
+│       │   └── money/           infrastructure, domain primitives: Currency, Money, Ratio, MoneyRounding
 │       ├── main/resources/      logback.xml
 │       └── test/kotlin/ai/project/rio/
 │           ├── cardtransaction/ mirrors the feature package: <Class>Test.kt per production class
@@ -149,7 +149,7 @@ Points to take from it:
 - The chain is Route -> Service -> Repository. The Service is the only thing a Route calls, and
   the only production code that constructs the feature's Repositories, with one exception:
   `db/SchemaInitializer.seedIfEmpty` builds `CardTransactionRepository` to insert the demo rows
-  (see "Shared and infrastructure code"). The Service never sees DTOs; Routes convert before
+  (see "Infrastructure code"). The Service never sees DTOs; Routes convert before
   calling it.
 
 ### Repository
@@ -179,17 +179,18 @@ one. (Convention for the one feature; consistent with the README.)
 | Wire / HTTP DTOs (request and response) | `<Feature>Dtos.kt` in the feature package, with the `toDto()` / `toNewCardTransaction()` mapping functions and any custom fastjson2 reader | `CardTransactionDto`, `CreateCardTransactionRequest`, `CardTransactionListResponse`, `CreateCardTransactionsBody` |
 | Persistence entity | none: repositories map `ResultSet` rows directly to the domain type | `CardTransactionRepository.mapCardTransaction` |
 | Repository-local record | in the repository file that reads it | `IdempotencyRecord` in `CardTransactionIdempotencyRepository.kt` |
-| Shared domain primitive | `money/` | `Money`, `Currency` |
+| Money domain primitive | `money/` | `Money`, `Currency` |
 | Error shape | `http/ApiError.kt` (one shape for every error) | `ApiError` |
 
 DTOs mirror `contracts/schemas` exactly and are hand-written; the schema tests catch drift. Money
 enters as `MoneyDto` (integer string + code) and is converted to `Money` in `<Feature>Dtos.kt`;
 services and repositories only ever see `Money`.
 
-## Shared and infrastructure code
+## Infrastructure code
 
 Three packages hold code that is not owned by a feature. Each has a narrow, named job; none is a
-dumping ground.
+dumping ground. Code goes in them by kind, not by how many features use it; see "Feature-local,
+shared, infrastructure".
 
 ### `db/`: JDBC and SQLite infrastructure
 
@@ -203,8 +204,8 @@ guard, and the seed rows).
   only JDBC and is the base class for services that own multi-statement writes (`backend/AGENTS.md`
   "Transactions"); a service that only reads, or writes one row, does not need it. (Exception to
   "services live in features", deliberate.)
-- `SchemaInitializer` is the one shared file that imports a feature: it holds the `CREATE TABLE`
-  statements for every table, including the feature's, and seeds through
+- `SchemaInitializer` is the one infrastructure file that imports a feature: it holds the
+  `CREATE TABLE` statements for every table, including the feature's, and seeds through
   `CardTransactionRepository`. Table DDL is therefore centralized in `db/`, not feature-local.
   This is required by `backend/AGENTS.md` ("Schema DDL lives in `db/SchemaInitializer.kt`") and is
   the intended place for a new feature's tables. (Exception to feature-locality, deliberate.)
@@ -232,22 +233,30 @@ converter), `JsonRequest` (`receiveJson`), `JsonSyntax` (RFC 8259 check),
   mapping and outside any project file.
 - `http/` imports nothing from features, `db/` or `money/`. (Convention, verified from imports.)
 
-### `money/`: shared domain primitives
+### `money/`: domain primitives
 
 `Currency`, `Money`, `Ratio`, `MoneyRounding`. Used by every feature and by `db/SchemaInitializer`.
 Depends on nothing else in the backend. New money behaviour goes here; a parallel representation
 elsewhere is forbidden by `backend/AGENTS.md`.
 
-### Feature-local vs shared
+### Feature-local, shared, infrastructure
 
-Prefer feature-local placement. Promote code to `db/`, `http/` or `money/` only when it represents a
-genuine cross-feature concern of that package's kind: JDBC mechanics, HTTP/JSON mechanics, or money
-arithmetic. The code shows this in both directions: `CardTransactionRequestFingerprint` and
-`CardTransactionIdempotencyRepository` stayed in the feature although "fingerprint" and
-"idempotency" sound reusable, while `TransactionalService` was extracted to `db/` precisely because
-the feature spec said future features "would each have to re-invent the wiring". Do not create a
-`common/`, `shared/`, `util/` or `core/` package; the three existing shared packages are named after
-what they contain.
+Shared code is code used by at least two features. Being shared does not by itself move code out
+of its feature package; what decides placement is whether the code carries feature knowledge
+(root `AGENTS.md`):
+
+- JDBC, HTTP/JSON or money mechanics with no feature knowledge go in `db/`, `http/` or `money/`
+  even when one feature uses them. `TransactionalService` was extracted to `db/` with one feature
+  behind it because the feature spec said future features "would each have to re-invent the
+  wiring".
+- Code that carries feature knowledge stays in the feature that owns it, whether one feature or
+  several use it. `CardTransactionRequestFingerprint` and `CardTransactionIdempotencyRepository`
+  stayed in `cardtransaction/` although "fingerprint" and "idempotency" sound reusable. A second
+  feature that needs such code depends on the owning feature; how it does so is the open item in
+  "Dependency rules".
+
+Do not create a `common/`, `shared/`, `util/` or `core/` package; the three infrastructure packages
+are named after what they contain.
 
 ## Directory responsibilities
 
@@ -255,8 +264,9 @@ what they contain.
 
 Everything one business capability needs on the server: `<Feature>.kt` (domain), `<Feature>Dtos.kt`
 (wire), `<Feature>Routes.kt`, `<Feature>Service.kt`, one or more `*Repository.kt`, and feature-local
-helpers. JDBC plumbing, JSON/HTTP plumbing, money arithmetic, table DDL and code another feature
-also needs do not go here.
+helpers. JDBC plumbing, JSON/HTTP plumbing, money arithmetic and table DDL do not go here. Code
+that carries this feature's knowledge does, even when another feature also uses it (see
+"Feature-local, shared, infrastructure").
 
 For example, a new `GET /api/card-transactions/{id}/receipt` handler goes in
 `CardTransactionRoutes.kt`; the rule "a receipt exists only for COMPLETED" goes in
@@ -272,7 +282,7 @@ business rules, or configuration that belongs to one feature do not go here.
 
 ### `backend/src/main/kotlin/ai/project/rio/db/`, `http/`, `money/`
 
-See "Shared and infrastructure code". Add to them only for a JDBC, HTTP/JSON or money concern
+See "Infrastructure code". Add to them only for a JDBC, HTTP/JSON or money concern
 respectively.
 
 ### `backend/src/test/kotlin/ai/project/rio/`
@@ -433,13 +443,13 @@ stem must be unique after PascalCasing.
 
 ### Backend
 
-The boundaries are feature packages and the three shared packages, not a repository-wide
+The boundaries are feature packages and the three infrastructure packages, not a repository-wide
 Route/Service/Repository layering. Verified from imports today:
 
 ```text
 Application.kt ──> cardtransaction, db, http
                        │
-cardtransaction ──> db, http, money        (feature depends on shared)
+cardtransaction ──> db, http, money        (feature depends on infrastructure)
 db              ──> money, cardtransaction (SchemaInitializer only: DDL + seed)
 http            ──> (nothing internal)
 money           ──> (nothing internal)
@@ -466,11 +476,11 @@ Inside a feature, responsibilities flow one way:
 - The one exception is `db/SchemaInitializer`, which imports `cardtransaction` for DDL and seed
   data. Extend that file for new tables; do not use it as licence for other `db/` code to import
   features.
-- There is one feature, so no feature-to-feature import exists to learn from. When a second
-  feature arrives, prefer depending on the other feature's Service (its public entry point) or on
-  a `money/`-style shared primitive, and avoid reaching into another feature's Repository or Dtos.
-  This is guidance consistent with the feature-first decision, not an established rule; see
-  "Uncertainties".
+- There is one feature, so no feature-to-feature import exists to learn from. Code a second
+  feature needs stays in the feature that owns it (root `AGENTS.md`); what is open is how the
+  second feature reaches it. Prefer depending on the owning feature's Service (its public entry
+  point), and avoid reaching into its Repository or Dtos. That preference is guidance consistent
+  with the feature-first decision, not an established rule; see "Uncertainties".
 
 ### Frontend
 
@@ -553,7 +563,7 @@ Only what affects where a file goes and how it is found.
 | Repository | `<Feature>Repository.kt`, `class <Feature>Repository`; a second one `<Feature><Concern>Repository.kt` | `CardTransactionIdempotencyRepository` |
 | Feature helper | `<Feature><Concern>.kt`, usually an `object` | `CardTransactionRequestFingerprint` |
 | No suffixes | no `Impl`, no `Interface`, no `Entity`, no `Controller` | |
-| Shared packages | named after the concern: `db`, `http`, `money` | |
+| Infrastructure packages | named after the concern: `db`, `http`, `money` | |
 | Backend test | `<Class>Test.kt`, same package | `CardTransactionRoutesTest.kt` |
 | SQLite tables | `snake_case`, prefixed by the feature's noun | `card_transactions`, `card_transaction_idempotency_items` |
 | Schema file | `<kebab-case>.schema.json`; `$id` = `https://rio.local/schemas/<file>` | `create-card-transactions-request.schema.json` |
@@ -577,9 +587,9 @@ Only what affects where a file goes and how it is found.
 3. Do not group code by technical type across features. Two features' routes live in two feature
    packages, never in one `routes/` package.
 4. Only if the code is JDBC mechanics, HTTP/JSON mechanics or money arithmetic with no feature
-   knowledge does it go to `db/`, `http/` or `money/`; caller count is not the test. Table DDL
-   always goes to `db/SchemaInitializer.kt`; application exceptions that map to an HTTP status go
-   to `http/ApiError.kt` (root `AGENTS.md`).
+   knowledge does it go to `db/`, `http/` or `money/`; whether a second feature uses it is not
+   the test, in either direction. Table DDL always goes to `db/SchemaInitializer.kt`; application
+   exceptions that map to an HTTP status go to `http/ApiError.kt` (root `AGENTS.md`).
 5. Before adding a new kind of file or a sub-package, check `cardtransaction/`: if it has no such
    thing, the feature probably does not need it either.
 6. Before adding a new package under `ai.project.rio`, confirm that neither a feature package nor
@@ -609,8 +619,8 @@ feature gets a spec in `features/` before code.
 - `db/TransactionalService.kt` is a "Service" file outside a feature. It is an infrastructure base
   class that knows only JDBC; feature services extend it. Not a template for putting services in `db/`.
 - `db/SchemaInitializer.kt` imports the feature. Table DDL and seed data for every feature are
-  centralized here by rule (`backend/AGENTS.md`), which makes `db/` the one shared package that
-  depends on a feature package. Intentional; extend it for new tables.
+  centralized here by rule (`backend/AGENTS.md`), which makes `db/` the one infrastructure
+  package that depends on a feature package. Intentional; extend it for new tables.
 - `http/ApiError.kt` holds a feature-specific exception. `IdempotencyConflictException` exists
   for one endpoint but lives with the other HTTP exceptions so `ErrorHandling.kt` has one status
   table. Intentional, and the rule for the next one too (root `AGENTS.md`); see "Uncertainties".
@@ -627,10 +637,11 @@ Every rule above is in force as written. This section records where the code beh
 thin, so a reader knows which rules the maintainer expects to revisit when a second feature or
 resource lands. The revisits are tracked in #79; until one is decided, the current rule applies.
 
-- Cross-feature dependencies have no example. With one feature, no rule about feature A importing
-  feature B can be read from the code, and no `AGENTS.md` states one. The guidance in "Dependency
-  rules" (depend on the other feature's Service, not its Repository or Dtos) follows from the
-  feature-first decision and is the only item here that is guidance rather than a rule.
+- Cross-feature dependencies have no example. Shared code that carries feature knowledge stays
+  in its owning feature (root `AGENTS.md`), but with one feature no rule about how feature A
+  imports feature B can be read from the code, and no `AGENTS.md` states one. The guidance in
+  "Dependency rules" (depend on the owning feature's Service, not its Repository or Dtos) follows
+  from the feature-first decision and is the only item here that is guidance rather than a rule.
 - HTTP-mapped exceptions go in `http/ApiError.kt` (root `AGENTS.md`). The cost is that `http/`
   accumulates knowledge of every feature's failure modes; the maintainer may later prefer
   feature-local exception classes with handlers still registered in `http/ErrorHandling.kt`.

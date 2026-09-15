@@ -42,9 +42,9 @@ The Kotlin/Ktor backend is organized by feature, not by technical layer.
 - Do not create `routes/`, `services/`, `repositories/` or `models/` packages at any level.
 - Name the core files `<Feature>.kt`, `<Feature>Dtos.kt`, `<Feature>Routes.kt`, `<Feature>Service.kt`, `<Feature>Repository.kt`; further feature-owned files are `<Feature><Concern>.kt` (`CardTransactionRequestFingerprint.kt`, `CardTransactionIdempotencyRepository.kt`). No `Impl` or interface for a single implementation.
 - A new feature is wired by hand in `Application.kt`: construct its Service, register its `Route.<feature>Routes()`.
-- Put code in `db/`, `http/` or `money/` only when it is JDBC, HTTP/JSON or money mechanics with no feature knowledge; caller count is not the test. Do not add `common/`, `shared/` or `util/` packages.
+- Shared code is code used by at least two features. Being shared does not decide placement: `db/`, `http/` and `money/` hold JDBC, HTTP/JSON and money mechanics with no feature knowledge, even when one feature uses them; code that carries feature knowledge stays in the feature that owns it, even when several features use it. Do not add `common/`, `shared/` or `util/` packages.
 - Table DDL and seed rows go in `db/SchemaInitializer.kt`; application exceptions that map to an HTTP status are declared in `http/ApiError.kt` and mapped in `http/ErrorHandling.kt`.
-- `http/` and `money/` never import a feature package. `db/SchemaInitializer.kt` is the only shared file allowed to.
+- `http/` and `money/` never import a feature package. `db/SchemaInitializer.kt` is the only file outside a feature package allowed to.
 - Backend tests mirror the main package as `<Class>Test.kt`; route tests schema-validate real responses with `contract/JsonSchemaAssertions`.
 
 ### Frontend
