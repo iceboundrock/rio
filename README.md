@@ -74,7 +74,7 @@ repositories and paid plans); once available, set it under
 contracts/schemas/     JSON Schema (Draft 2020-12). The single source of truth for HTTP shapes.
 backend/src/main/kotlin/ai/project/rio/
   Application.kt       wiring + main()
-  db/                  Database (SQLite connection setup), JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
+  db/                  Database (SQLite connection setup), JdbcExecutor, JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
   cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire),
                        IdempotencyRepository (Idempotency-Key SQL), RequestFingerprint (SHA-256 identity of a validated create)
@@ -247,9 +247,13 @@ Ktor Route              cardtransaction/CardTransactionRoutes.kt     (DTO <-> do
 Service                 cardtransaction/CardTransactionService.kt    (business rules, ids, timestamps;
                         extends db/TransactionalService: multi-row writes run in one transaction)
   ↓
-Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction)
+Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction; takes a JdbcExecutor)
   ↓
-JdbcTemplate            db/JdbcTemplate.kt   (prepare, bind, map, close, withTransaction)
+JdbcExecutor            db/JdbcExecutor.kt   (query, queryOne, update, ...; the standalone JdbcTemplate below, or the
+                        transaction-bound executor that `transactional { tx -> }` hands to the block)
+  ↓
+JdbcTemplate            db/JdbcTemplate.kt   (prepare, bind, map, close; one connection per standalone call, or one
+                        connection for a whole withTransaction block)
   ↓
 SQLite                  backend/data/rio.db
 ```
