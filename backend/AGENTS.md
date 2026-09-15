@@ -13,7 +13,7 @@ Source paths below are relative to `backend/src/main/kotlin/ai/project/rio/`.
 - Feature query and DML SQL lives in concrete repositories (`cardtransaction/CardTransactionRepository.kt`); table DDL is the `SchemaInitializer.kt` exception described below. Always bind values with `?` parameters; never interpolate.
 - `db/JdbcTemplate.kt` handles JDBC mechanics only. It must not learn about Money or any domain type.
 - Business rules belong in services (`cardtransaction/CardTransactionService.kt`).
-- HTTP translation belongs in routes and `http/ErrorHandling.kt`. The current card-transaction application exceptions are declared in `http/ApiError.kt` and mapped in `http/ErrorHandling.kt`. Placement of a new capability's HTTP-visible exception is unresolved; see issue #79.
+- HTTP translation belongs in routes and `http/ErrorHandling.kt`. Every application exception that becomes an HTTP error, whichever capability raises it, is declared in `http/ApiError.kt` and mapped in `http/ErrorHandling.kt`. Reuse an existing exception when its HTTP meaning fits; a new status or error code adds an exception class there, a mapping in `http/ErrorHandling.kt`, and the code to the enum in `contracts/schemas/api-error.schema.json`. A capability package declares no exception classes and registers no `StatusPages` handlers.
 - Do not create generic repository hierarchies or interfaces with a single implementation.
 - Schema DDL lives in `db/SchemaInitializer.kt`. There are no migrations: edit the DDL and reset the database file. That file is `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the backend was started from (`backend/data/rio.db` with the README's `cd backend && ./gradlew run`).
 - Keep the startup schema-drift guard in `SchemaInitializer.initialize`: tables are created only for a fresh file (none of the expected tables present); otherwise every expected table must exist and its stored DDL must match the current definition, or startup refuses with reset instructions before running any DDL. `SchemaInitializerTest` covers it. Do not add code that migrates an old database, completes a file that has only some of the tables, or keeps serving it; a mismatch is always a reset.
@@ -50,6 +50,13 @@ currency or do not offer it.
 - Check the row count that `update` returns whenever correctness depends on it: zero affected rows on a conditional update means the condition failed, so raise the domain error instead of reporting success.
 - SQLite serializes writers and connections wait up to the busy timeout configured in `db/Database.kt`. Keep transactions short so they do not hold that lock, and never make an external network call from inside a transaction. If a workflow needs both, record the intent in the database first and perform the external call afterwards (an outbox or compensation step) rather than stretching the transaction across the network.
 - Retry a failed transaction only when the whole block is safe to run again; a block that has already produced a side effect outside the database is not.
+
+## Cross-capability access
+
+- A capability depends on another only through the owner's service and domain types (for card transactions, `cardtransaction/CardTransactionService.kt` and `cardtransaction/CardTransaction.kt`). Never import another capability's repositories, DTOs, routes, or other owned concerns: the owner's business rules run only inside its service.
+- `Application.kt` constructs the owner before the consumer and passes the owner's service through the consumer's constructor. Dependencies between capabilities must not form a cycle; when two capabilities each need the other, the shared logic belongs to one of them or to a new capability, and the work item records which.
+- To run an owner's write inside the consumer's transaction, the owner exposes a service operation that takes the transaction-bound executor (`fun reserve(tx: JdbcExecutor, ...)`) and constructs its repositories from `tx`; the consumer calls it from inside its own `transactional { tx -> ... }`. The owner's standalone variant wraps the same operation in its own `transactional`. This is the only way to share a transaction: calling the owner's standalone method from inside the block opens a second connection, and nested `withTransaction` is not supported.
+- The owner's transaction-bound operation raises its domain error and neither catches it nor commits; the consumer's block decides the outcome, and a failure rolls back both capabilities' statements together.
 
 ## Idempotency
 
