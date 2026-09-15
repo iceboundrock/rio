@@ -34,7 +34,9 @@ would each have to re-invent the wiring. There was also no way to create several
 
 ## Notes / Decisions
 
-- Base class rather than a repository registry: it is ~10 lines, knows only JDBC, and keeps `Route -> Service -> Repository -> JdbcTemplate` explicit.
+- Base class rather than a repository registry: it is ~10 lines, knows only JDBC, and keeps
+  `Route -> Service -> Repository -> JdbcExecutor -> SQLite` explicit. The service holds the `JdbcTemplate`; a repository
+  takes `JdbcExecutor`, so inside `transactional { tx -> }` it is built from the transaction-bound `tx`, never from the template.
 - `CardTransactionService` now takes `JdbcTemplate` instead of a repository. Breaking for callers; this is a learning project with no compatibility requirement.
 - The request body serializer reads the JSON tree to tell object from array, then decodes that tree from its *text* again.
   Only kotlinx's streaming decoder annotates `MissingFieldException` with the JSON path, which `ErrorHandling.kt` turns into

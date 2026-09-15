@@ -1,7 +1,7 @@
-# Rio Starter — Card Transactions
+# Rio Starter: card transactions
 
-A deliberately small full-stack app: **Kotlin + Ktor + plain JDBC + SQLite** on the back,
-**React + TypeScript + Vite** on the front, and **shared JSON Schema** contracts in between.
+A deliberately small full-stack app: Kotlin, Ktor, plain JDBC and SQLite on the back, React,
+TypeScript and Vite on the front, and shared JSON Schema contracts in between.
 It exists to be understood in five minutes and extended in twenty. Read `AGENTS.md` before changing anything.
 
 This is a learning project for practising AI-assisted coding, not a product. Unless a task says
@@ -30,7 +30,7 @@ pnpm install
 pnpm run dev
 ```
 
-Open http://localhost:5173 — it redirects to `/card-transactions`.
+Open http://localhost:5173, which redirects to `/card-transactions`.
 
 ## Tests and verification
 
@@ -39,7 +39,7 @@ cd backend && ./gradlew test          # Money, JdbcTemplate, repository, and rou
 cd frontend && pnpm test --run        # Money helpers + schema validation with the shared schemas
 cd frontend && pnpm run build         # typecheck + production build
 cd frontend && pnpm run preview       # serve the build under Content-Security-Policy: script-src 'self' (backend on :8080)
-./verify.sh                           # all of the above, from the repo root
+./verify.sh                           # everything CI runs, from the repo root
 ```
 
 `pnpm test` and `pnpm run build` first regenerate `frontend/src/api/validators.generated.{js,d.ts}` from
@@ -51,10 +51,10 @@ fails when they do not match the schemas, and runs the frontend tests with Node'
 ### Continuous integration
 
 `.github/workflows/verify.yml` runs `./verify.sh` on every pull request and on pushes to
-`main`. CI runs the same script you run locally — there is no separate CI-only test sequence.
+`main`. CI runs the same script you run locally; there is no separate CI-only test sequence.
 It runs the script once per JDK (Temurin 25, 21 and 17, overriding the toolchain pin through
-the `jdkVersion` Gradle property) on a single Node version — Node only drives the frontend
-toolchain, the React app never runs on it. That version is exactly 24.21.0, the floor of the
+the `jdkVersion` Gradle property) on a single Node version (Node only drives the frontend
+toolchain; the React app never runs on it). That version is exactly 24.21.0, the floor of the
 `engines.node` range in `frontend/package.json`, so a newer-than-floor Node API sneaking into
 the build or test setup fails in CI; local development on a newer Node covers the other end.
 No external services and no secrets: backend tests create temporary SQLite files. When a run
@@ -62,7 +62,7 @@ fails, the backend HTML and XML test reports are uploaded as a
 `backend-test-reports-jdk-<version>` artifact.
 
 The matrix jobs report as `verify (jdk 25)` and friends; a single aggregate job named
-**`verify`** passes only when all of them do. Require `verify` — and only `verify` — in branch
+`verify` passes only when all of them do. Require `verify`, and only `verify`, in branch
 protection, so adding or dropping a JDK version never changes the required check. That setting
 is not configurable on this repository today (GitHub restricts branch protection to public
 repositories and paid plans); once available, set it under
@@ -71,35 +71,35 @@ repositories and paid plans); once available, set it under
 ## Where things are
 
 ```text
-contracts/schemas/     JSON Schema (Draft 2020-12). The single source of truth for HTTP shapes.
+contracts/schemas/     JSON Schema (Draft 2020-12). Source of truth for application JSON body shapes.
 backend/src/main/kotlin/ai/project/rio/
   Application.kt       wiring + main()
-  db/                  Database (SQLite connection setup), JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
+  db/                  Database (SQLite connection setup), JdbcExecutor, JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
   money/               Currency, Money, Ratio, MoneyRounding
   cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire),
                        IdempotencyRepository (Idempotency-Key SQL), RequestFingerprint (SHA-256 identity of a validated create)
-  http/                ApiError, ErrorHandling (exception -> status mapping), JsonConverter (fastjson2 <-> HTTP bodies),
-                       JsonSyntax (RFC 8259 grammar check), EcmaScript (the whitespace set JSON Schema `\s` means)
+  http/                ApiError, ErrorHandling (exception -> status mapping), JsonConverter and JsonRequest (fastjson2 <-> HTTP bodies),
+                        JsonSyntax (RFC 8259 grammar check), EcmaScript (the whitespace set JSON Schema `\s` means)
 backend/src/test/...   MoneyTest, JdbcTemplateTest, TransactionalServiceTest, CardTransactionRepositoryTest, CardTransactionRoutesTest,
                        CardTransactionServiceTest (replay, conflict, rollback, restart, parallel keys), CardTransactionIdempotencyRepositoryTest,
                        CardTransactionRequestFingerprintTest, SchemaInitializerTest,
-                       contract/JsonSchemaAssertions (networknt Draft 2020-12 validator over ../contracts/schemas, `pattern`s
-                       matched by joni in ECMAScript mode), JsonSchemaAssertionsTest, JsonSyntaxTest
+                        contract/JsonSchemaAssertions (networknt Draft 2020-12 validator over ../contracts/schemas, `pattern`s
+                        matched by joni in ECMAScript mode), JsonSchemaAssertionsTest, CurrencyContractTest; http/JsonSyntaxTest
 frontend/src/
   api/                 client.ts (fetch + validate), schemas.ts (wire types + typed validators), cardTransactions.ts (endpoints),
-                       validators.generated.{js,d.ts} (GENERATED by scripts/generate-validators.mjs from ../contracts/schemas; do not edit)
+                        errors.ts, validators.generated.{js,d.ts} (GENERATED by scripts/generate-validators.mjs from ../contracts/schemas; do not edit)
   money/               money.ts (bigint Money, formatting), money.test.ts
   types/               cardTransaction.ts (domain types)
-  pages/               CardTransactionListPage, CardTransactionDetailsPage
+  pages/               CardTransactionListPage, CardTransactionDetailsPage, latestRequest (keeps only the newest in-flight response)
   components/          CardTransactionList, CardTransactionRow, CreateCardTransactionsForm (one or more rows, all-or-nothing)
-features/              one Markdown spec per interview feature
+features/              one Markdown spec per interview work item
 ```
 
 ## API
 
-| Method | Path                          | Success                              | Errors   |
-|--------|-------------------------------|--------------------------------------|----------|
-| GET    | `/api/card-transactions`      | 200 `{ "items": [CardTransaction] }` | —        |
+| Method | Path                          | Success                              | Resource-specific errors |
+|--------|-------------------------------|--------------------------------------|--------------------------|
+| GET    | `/api/card-transactions`      | 200 `{ "items": [CardTransaction] }` | none     |
 | GET    | `/api/card-transactions/{id}` | 200 `CardTransaction`                | 404      |
 | POST   | `/api/card-transactions`      | 201 `CardTransaction` for an object body; 201 `{ "items": [CardTransaction] }` for an array body; requires `Idempotency-Key` | 400, 415, 422 |
 
@@ -129,7 +129,7 @@ including an unknown sub-path such as `/api/card-transactions/{id}/extra`, stays
   { "description": "Ramen", "amount": { "amount": "1200", "currency": "JPY" }, "type": "CREDIT" }
 ]
 
-// Any error
+// Application error with a JSON body
 { "code": "VALIDATION_ERROR" | "NOT_FOUND" | "INTERNAL_ERROR" | "IDEMPOTENCY_CONFLICT", "message": "amount must be positive" }
 ```
 
@@ -151,30 +151,31 @@ runs, with its own plain-text 400 rather than the `ApiError` shape; the route's 
 remaining control characters (C1, such as U+0085). The key names one logical create
 operation, not a payload: it exists so a client that never saw the `201` can retry safely.
 
-- **First use**: the request is processed as described above and answered `201`.
-- **Replay**: the same key with the same logical request answers `201` with the same body as the first time,
-  including ids, `createdAt` and batch order, and inserts nothing. There is no replay indicator.
-- **Conflict**: the same key with a different logical request answers 422 `IDEMPOTENCY_CONFLICT`
+- On first use the request is processed as described above and answered `201`.
+- A replay, the same key with the same logical request, answers `201` with the same body as the first
+  time, including ids, `createdAt` and batch order, and inserts nothing. There is no replay indicator.
+- A conflict, the same key with a different logical request, answers 422 `IDEMPOTENCY_CONFLICT`
   (`Idempotency-Key was already used with a different request`) and writes nothing.
-- **Identity** is the validated request, not the JSON text: the trimmed description, the amount in minor
-  units, the currency, the type, the item order, and whether the body was an object or an array (`{...}` and
-  `[{...}]` answer with different shapes, so they are different requests). Member order and whitespace do
-  not matter. Two different keys with identical data are two transactions: this is retry deduplication,
-  not duplicate-transaction detection.
-- **Failure window**: a request rejected before the transaction (media types, malformed JSON, invalid
-  fields, blank descriptions, non-positive amounts, an invalid batch item) leaves the key unused. The key
-  is claimed inside the same SQLite transaction as the rows and the ordered id mapping, so a rollback
-  releases it and a commit consumes it even if the response is lost. Keys never expire.
-- **Concurrency**: the primary key on the stored key decides ownership. Parallel requests with the same key
-  produce one set of rows; the others wait for the writer and replay it, or get 422 if their payload differs.
+- The identity of a request is the validated request, not the JSON text: the trimmed description, the
+  amount in minor units, the currency, the type, the item order, and whether the body was an object or an
+  array (`{...}` and `[{...}]` answer with different shapes, so they are different requests). Member order
+  and whitespace do not matter. Two different keys with identical data are two transactions: this is retry
+  deduplication, not duplicate-transaction detection.
+- A request rejected before the transaction (media types, malformed JSON, invalid fields, blank
+  descriptions, non-positive amounts, an invalid batch item) leaves the key unused. The key is claimed
+  inside the same SQLite transaction as the rows and the ordered id mapping, so a rollback releases it and
+  a commit consumes it even if the response is lost. Keys never expire.
+- Under concurrency the primary key on the stored key decides ownership. Parallel requests with the same
+  key produce one set of rows; the others wait for the writer and replay it, or get 422 if their payload
+  differs.
 
 POST requires `Content-Type: application/json`; missing, blank, or unsupported content types return 415
 with `VALIDATION_ERROR`. Responses from the card transaction POST handler advertise `Accept-Post: application/json`.
 A malformed `Content-Type` header returns 400 with `malformed Content-Type header`.
-A body that cannot be read - not RFC 8259 JSON (comments, trailing commas and a byte order mark
-included, which fastjson2 alone would accept), a missing or unknown field, the wrong JSON kind for a
-field (a number, boolean, object or array where the contract says string) - returns 400 with
-`malformed request body` and names nothing from the input.
+A body that cannot be read returns 400 with `malformed request body` and names nothing from the
+input. That covers text that is not RFC 8259 JSON (comments, trailing commas and a byte order mark
+included, which fastjson2 alone would accept), a missing or unknown field, and the wrong JSON kind
+for a field (a number, boolean, object or array where the contract says string).
 A description is blank when every character is ECMAScript whitespace, the set the contract's
 `pattern: "\S"` means; that includes U+00A0 and U+FEFF and excludes U+001C..U+001F, unlike Kotlin's
 `isBlank`. The stored description is trimmed by the same set.
@@ -184,9 +185,9 @@ A malformed `Accept` header returns 400 with `malformed Accept header` before th
 Error responses are explicitly serialized as JSON regardless of `Accept`, including the status the
 framework raises on its own: an unroutable method returns 405 `method not allowed` with `Allow`.
 
-Every response this API produces — success or error — is `application/json`, so acceptability is
-decided from `Accept` alone, *before* any route runs: a request that excludes JSON returns 406
-`no acceptable response media type` and has no side effects (a rejected POST writes nothing).
+Application responses with bodies are `application/json`, so acceptability is decided from
+`Accept` alone, *before* any route runs: a request that excludes JSON returns 406 `no acceptable
+response media type` and has no side effects (a rejected POST writes nothing).
 The selected semantics (RFC 9110 §12.5.1):
 
 - An absent or empty `Accept` expresses no preference and accepts anything.
@@ -198,29 +199,29 @@ The selected semantics (RFC 9110 §12.5.1):
   while `application/json, */*;q=0` is accepted.
 - `q=0` excludes; any `q` above zero accepts, since there is nothing to choose between. The parameter
   name is case-insensitive (`Q=0` excludes too).
-- The header is read against the RFC 9110 grammar, not a lenient approximation of it: a bare `*`
-  or a wildcard type with a concrete subtype (`*/json`) — neither is a media range; §12.5.1 permits
-  `*/*`, `type/*`, `type/subtype` — spaces inside a media range, a quoted qvalue (`q="0.5"`) or one
-  outside §12.4.2 (`q=abc`, `q=2`, `q=.5`) is a malformed `Accept` and returns 400 rather than a
-  guessed preference. Quoted-string parameters other than `q` are grammatical and may contain `,`
-  or `;`.
+- The header is read against the RFC 9110 grammar, not a lenient approximation of it. A bare `*`
+  or a wildcard type with a concrete subtype (`*/json`) is not a media range, since §12.5.1 permits
+  `*/*`, `type/*` and `type/subtype`. Either of those, spaces inside a media range, a quoted qvalue
+  (`q="0.5"`) or one outside §12.4.2 (`q=abc`, `q=2`, `q=.5`) is a malformed `Accept` and returns
+  400 rather than a guessed preference. Quoted-string parameters other than `q` are grammatical and
+  may contain `,` or `;`.
 - Range parameters other than `q` are parsed but deliberately not matched, a simplification of full
   media-range parameter matching: `application/json;charset=utf-16` is treated as `application/json`,
   because the produced type carries no parameter a range could select between.
 
-The 406 body is itself the JSON `ApiError` shape even though the caller said it would not accept JSON;
-there is no empty error response anywhere in the API. The one response not in that shape comes from the
-HTTP engine rather than the API: a request whose headers Netty cannot decode (a control character in a
-field value, for instance) gets Netty's plain-text 400 before Ktor sees it. Because every outcome depends on `Accept`,
-every response carries `Vary: Accept` (§12.5.5), so a shared cache cannot reuse a stored JSON body
-for a request the server would reject.
+The 406 body is itself the JSON `ApiError` shape even though the caller said it would not accept JSON.
+Application-generated error responses with bodies use that shape; `HEAD` responses are bodyless.
+A request whose headers Netty cannot decode (a control character in a field value, for instance)
+gets Netty's plain-text 400 before Ktor sees it. Because application routing depends on `Accept`,
+application responses carry `Vary: Accept` (§12.5.5), so a shared cache cannot reuse a stored JSON
+body for a request the server would reject.
 
 Unsupported media types return 415 without WARN logs; failure to transform a type explicitly accepted
 by the route returns 500 `INTERNAL_ERROR` and logs a server warning.
 Media-type matching is case-insensitive and accepts parameters such as `charset=utf-8`;
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
-Supported currencies are **BRL, CAD, CNY, EUR, JPY, USD** across the API, database, and UI.
+Supported currencies are BRL, CAD, CNY, EUR, JPY and USD across the API, database, and UI.
 If an existing local database predates this currency set or the idempotency tables, stop the backend and delete the database
 file before restarting: `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the
 backend was started from (`backend/data/rio.db` with the commands above). This resets local
@@ -246,15 +247,19 @@ Ktor Route              cardtransaction/CardTransactionRoutes.kt     (DTO <-> do
 Service                 cardtransaction/CardTransactionService.kt    (business rules, ids, timestamps;
                         extends db/TransactionalService: multi-row writes run in one transaction)
   ↓
-Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction)
+Repository              cardtransaction/CardTransactionRepository.kt (SQL, row <-> CardTransaction; takes a JdbcExecutor)
   ↓
-JdbcTemplate            db/JdbcTemplate.kt   (prepare, bind, map, close, withTransaction)
+JdbcExecutor            db/JdbcExecutor.kt   (query, queryOne, update, ...: prepare, bind, map, close). Two implementations,
+                        both in db/JdbcTemplate.kt: the standalone JdbcTemplate (one connection per call) and the
+                        transaction-bound executor that `transactional { tx -> }` hands to the block (one connection
+                        for the whole block). The repository cannot tell which one it was given.
   ↓
 SQLite                  backend/data/rio.db
 ```
 
-Errors flow back through `http/ErrorHandling.kt` as the shared `ApiError` shape; the frontend
-turns them into `ApiError` (server said no) or `ApiContractError` (response violates the schema).
+Application errors with JSON bodies flow back through `http/ErrorHandling.kt` as the shared
+`ApiError` shape; the frontend turns them into `ApiError` (server said no) or `ApiContractError`
+(response violates the schema).
 
 ## Money
 
@@ -291,7 +296,6 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | Choice | Why |
 |---|---|
 | SQLite file, no external DB | Zero setup; tests use temp files; restarts keep data. |
-| Plain JDBC + explicit `JdbcTemplate` / `JdbcExecutor` | SQL stays visible; standalone and transaction-scoped operations share a small API. |
 | `Money` value type, not `Long amount` + `String currency` | Currency can't be dropped or mixed by accident. |
 | Integer minor units, never floating point | Exactness. `0.1 + 0.2` is not a thing here. |
 | JSON amounts as integer *strings* | JS `number` can't hold all 64-bit values; strings can. |
@@ -299,42 +303,13 @@ turns them into `ApiError` (server said no) or `ApiContractError` (response viol
 | Hand-written DTOs and TS wire types | No code generation for the types; fastjson2 binds the DTO constructors, the schema tests catch drift. |
 | Shared JSON Schema, validated on both sides | One contract, executable in backend tests (networknt `json-schema-validator`, Draft 2020-12, `pattern`s matched by joni in ECMAScript mode, which agrees with Ajv on every construct the contracts use; an unescaped `.` is refused at load because joni's dot excludes only LF, RFC 8259 grammar checked before validating) and at frontend runtime (Ajv). |
 | Frontend validators precompiled at build time | The one code-generation step: Ajv normally compiles schemas with `new Function`, which a `Content-Security-Policy` without `unsafe-eval` blocks. `scripts/generate-validators.mjs` runs the same Ajv (`allErrors`, `strict`, Draft 2020-12) at build time into `validators.generated.js`; the browser ships only that code plus `ajv/dist/runtime/*`. |
-| Thin layers, no interfaces-with-one-impl, no DI | Small enough to hold in your head. |
-| `TransactionalService` base class for services that write more than one row | One place that knows how to start a transaction; services stay free of connection handling and repositories stay free of business rules. |
 | One `POST /api/card-transactions` accepting an object or an array | No second endpoint to keep in sync; the array form exercises the transactional path end to end. |
 
-## JDBC: baseline and optional operations
+## Implementation Rules
 
-Start with `query` (list), `queryOne` (row or null), and `update` (write/DDL).
-`CardTransactionRepository` uses these three operations and owns all SQL and row mapping.
-`JdbcTemplate` opens a connection per standalone operation. `JdbcExecutor` is also implemented
-by the transaction-scoped executor, which reuses one connection for the entire callback.
-
-Services that own multi-statement writes extend `db/TransactionalService`, receive the `JdbcTemplate`,
-and run the write inside `transactional { tx -> ... }`, constructing every participating repository
-from `tx`. `CardTransactionService.createAll` is the reference implementation:
-
-```kotlin
-class TransferService(jdbc: JdbcTemplate) : TransactionalService(jdbc) {
-    fun transfer(debit: NewCardTransaction, credit: NewCardTransaction) = transactional { tx ->
-        val repository = CardTransactionRepository(tx)
-        repository.insert(validated(debit))
-        repository.insert(validated(credit))
-    }
-}
-```
-
-A repository built from the template instead of `tx` would auto-commit on its own connection and escape
-the rollback, so the base class keeps its template private: inside a member function only `tx` resolves.
-A failure anywhere in the block rolls back all statements; success commits them together.
-Single-statement reads and writes use a repository built from the constructor parameter in a property
-initializer (see `CardTransactionService.repository`); SQLite already makes each statement atomic. Keep SQL in repositories and validation in services. Nested transactions are
-outside the starter scope.
-
-Optional operations are `queryForObject` (exactly one row), `extract` (consume a ResultSet),
-`batchUpdate` (atomic standalone batch or part of its surrounding transaction), and `execute`
-(parameterless DDL). Optional `StatementSettings` configure timeout, row cap, and fetch-size
-hints. Defaults leave driver settings untouched; ordinary features need only the baseline API.
+`backend/AGENTS.md`, `frontend/AGENTS.md`, and `contracts/AGENTS.md` own implementation rules.
+`directory-structure.md` owns file placement. This README describes the current application and
+its API rather than prescribing new implementation structure.
 
 ## Not implemented on purpose
 

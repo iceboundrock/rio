@@ -1,6 +1,6 @@
 # Features
 
-Each interview feature gets one Markdown file in this directory. The file is the shared
+Each interview work item gets one Markdown file in this directory. The file is the shared
 human/AI surface: agree on it first, then implement against it. Keep specs short and concrete.
 
 Suggested naming:
@@ -40,16 +40,15 @@ What user or engineering problem are we solving?
 ...
 ```
 
-## Checklist for any feature that touches the API
+## API Changes
 
-1. Update `contracts/schemas/*.schema.json` first.
-2. Update backend DTOs, route, service, repository (in that order of visibility).
-3. Add or extend route tests; they must schema-validate real responses.
-4. Update frontend wire types in `src/api/schemas.ts` and the mapper in `src/api/cardTransactions.ts`.
-5. Update pages/components.
-6. Run `./verify.sh`.
+For an application JSON body-shape change, follow `contracts/AGENTS.md`. For other API changes,
+follow the applicable scoped `AGENTS.md` and README API rules. The work-item spec records the
+change-specific requirements rather than repeating those rules.
 
-## Rules that apply to every feature
+## Completed Specs
 
-See `AGENTS.md`. In particular: Money is never a float, never mixed across currencies, and
-never a JSON number.
+Completed specs are historical records of their work items. A later spec can supersede behavior it
+explicitly changes, but completed acceptance criteria do not create repository-wide rules. Use the
+task's active spec for new work, the scoped `AGENTS.md` files for implementation rules, and the
+README for current API behavior.

@@ -1,9 +1,8 @@
-# Repository Rules
+# Repository rules
 
 This repository is optimized for short AI-assisted coding exercises. This file holds only the rules
-that apply to every change. Each major subtree has its own `AGENTS.md` with the rules for that code:
-read this file, then the file for the subtree you are editing. The most specific applicable
-`AGENTS.md` wins.
+that apply to every change. Read it before the scoped `AGENTS.md` for the code you are editing; the
+most specific applicable `AGENTS.md` wins.
 
 ## Purpose
 
@@ -26,8 +25,14 @@ deprecation periods. Document breaking changes in the PR description and move on
 |---|---|---|
 | `backend/` | Kotlin / Ktor HTTP API over SQLite through plain JDBC | `backend/AGENTS.md` |
 | `frontend/` | React / TypeScript single-page app; talks to the backend only over HTTP | `frontend/AGENTS.md` |
-| `contracts/schemas/` | JSON Schema for every HTTP shape; both sides validate against it. Any API shape change starts here | `contracts/AGENTS.md` |
-| `features/` | One Markdown spec per feature; agree on it before implementing | `features/README.md` |
+| `contracts/schemas/` | JSON Schema for application JSON request and response bodies | `contracts/AGENTS.md` |
+| `features/` | One Markdown spec per work item; agree on it before implementing | `features/README.md` |
+
+## File placement
+
+`directory-structure.md` is the source of truth for file placement and placement-related naming.
+The scoped `AGENTS.md` files own implementation rules for their subtrees; do not copy those rules
+into other documents.
 
 ## Money
 
