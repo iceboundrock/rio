@@ -67,7 +67,7 @@ explicit decision.
 | Money and currency mechanics | `money/` |
 
 The current capability-package convention is flat. Do not add repository-wide `routes/`,
-`services/`, `repositories`, or `models/` packages. A capability uses only the files it needs; the
+`services/`, `repositories/`, or `models/` packages. A capability uses only the files it needs; the
 five `<Feature>*.kt` names above are a naming pattern, not a required one-to-one inventory.
 Additional owned concerns stay in the capability package even when another capability also needs
 them. Whether packages remain flat at a larger size, and how a consumer may depend on the owner,
