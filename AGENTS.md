@@ -50,9 +50,11 @@ invariant holds in every scope; each scope's `AGENTS.md` says how its code expre
 
 ## Non-code artifacts
 
-Issues, PR descriptions, specs, plans, reviews, and every other non-code artifact follow
-@docs/non-code-rules.md: give readers the context and judgment the diff cannot, not a narrated diff
-or filler, and publish the full text on GitHub.
+Issues, PR descriptions, specs, plans, reviews, and every other non-code artifact give readers the
+context and judgment the diff cannot, not a narrated diff or filler, and are published in full on
+GitHub. The full rules:
+
+@docs/non-code-rules.md
 
 ## PR rules
 
@@ -62,7 +64,8 @@ or filler, and publish the full text on GitHub.
 
 ## Git conventions
 
-Commit messages (including squash merges), PR titles, and PR descriptions describe only the change.
-Never include AI attribution in any form: no `Co-Authored-By: Claude`, `Generated with ...` footers,
-sign-offs naming an AI agent or vendor (Claude, Anthropic, GPT, OpenAI, …), or `Claude-Session:`
-trailers and session URLs — even when a tool inserts them automatically.
+Never include AI attribution in commit messages, PR titles, or PR descriptions, in any form: no
+`Co-Authored-By: Claude`, `Generated with ...` footers, sign-offs naming an AI agent or vendor
+(Claude, Anthropic, GPT, OpenAI, …), or `Claude-Session:` trailers and session URLs — even when a
+tool inserts them automatically. When squash-merging, write a clean commit message that describes
+only the change itself.
