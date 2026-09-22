@@ -57,7 +57,8 @@ Reread once as a reader who was not in the session. Can they tell why this exist
 
 Every artifact must end up on GitHub, in English; a copy on disk doesn't count.
 
-- Post the full content, not a summary or file path, as a comment on the relevant PR if the work is under review, otherwise on the relevant issue (create one if none exists).
+- An issue or PR description is the body of that issue or PR; don't repeat it in a comment.
+- Post any other artifact in full, not as a summary or file path, as a comment on the relevant PR if the work is under review, otherwise on the relevant issue (create one if none exists).
 - Say in the comment which artifact it is (plan, spec, review, …) so a later reader knows what they are looking at.
 - A gitignored local working copy is fine, but don't force-add it to share it. If one exists, give its path in the comment.
 - Durable conventions (ADRs, runbooks, reference pages) still belong in `docs/`. The issue or PR records the discussion; `docs/` records the decision.
