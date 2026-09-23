@@ -36,7 +36,12 @@ capability (`cardtransaction/` in the backend, `src/api/cardTransactions.ts` and
 
 # 1. Spec
 
-Create or update `features/<feature-name>.md` from the `features/README.md` template.
+A spec is agreed only when the user says so, in the feature input (for example "`features/x.md` is
+agreed; implement it") or later in the conversation. A spec file existing is not agreement. If the
+spec is agreed, go straight to section 3 without editing it: an agreed spec changes only with the
+user's agreement, and never during an AutoForge run.
+
+Otherwise, create or update `features/<feature-name>.md` from the `features/README.md` template.
 
 Requirements must be testable. Not "Support filtering" or "Handle errors correctly", but:
 
@@ -51,11 +56,8 @@ or review: atomicity, concurrency, idempotency, financial correctness, destructi
 (say whether the local database must be reset), ambiguous HTTP semantics, or cross-capability
 dependencies. Do not invent trade-offs to make the spec look complete.
 
-A spec is agreed only when the user says so, in the feature input (for example "`features/x.md` is
-agreed; implement it") or later in the conversation. A spec file existing is not agreement. If the
-spec is agreed, go straight to section 3. Otherwise stop once the spec answers the design questions
-in section 2, list any open decisions, and end by asking the user to agree the spec before you write
-code.
+Stop once the spec answers the design questions in section 2, list any open decisions, and end by
+asking the user to agree the spec before you write code.
 
 # 2. Design questions to answer in the spec
 
@@ -91,12 +93,17 @@ Work in layer order (schema, domain and DTO mapping, repository, service, route,
 wiring, frontend wire types and API module, UI), writing each layer's tests with it rather than at
 the end.
 
+Update every authoritative record the change makes stale, in the same work item: the README "API"
+section when a method, path, status, or header changes, and the owning scoped `AGENTS.md` when the
+work introduces or changes a repository rule (owners are listed in `directory-structure.md`).
+`./verify.sh` does not check Markdown, so nothing else will catch a stale record.
+
 The UI implements the whole flow, not only the happy path: loading, empty, validation error, server
 error, contract error, network error, submitting, disabled, double-submit protection, and retry, as
 they apply.
 
-Log only what has diagnostic value; `backend/AGENTS.md` says what must never be logged. Error
-responses must not echo sensitive input or expose stack traces or SQL.
+Log only what has diagnostic value; `backend/AGENTS.md` says what must never be logged or returned
+in an error response.
 
 Before finishing, check the risks that apply: SQL injection, unbounded input, integer overflow,
 money precision, unknown JSON properties, duplicate requests, concurrent or partial writes, and
@@ -125,7 +132,8 @@ When the request leaves details unspecified:
 
 1. Look for precedent in existing code, tests, specs, and the README.
 2. Choose the smallest design that satisfies the requirement. Do not expand scope.
-3. Record assumptions that affect API semantics, data integrity, or user-visible behavior in the spec.
+3. Record assumptions that affect API semantics, data integrity, or user-visible behavior in the spec
+   while it is being agreed; after agreement, list them under Key decisions in the report instead.
 4. Make safe local decisions directly instead of returning every minor choice to the user.
 5. If two choices produce materially different external behavior and the repository gives no basis
    for choosing, name the open decision instead of inventing a requirement.

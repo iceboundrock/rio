@@ -35,6 +35,7 @@ for future code.
 | `frontend/` | React/TypeScript application and frontend tests |
 | `contracts/schemas/` | Shared JSON request and response body schemas |
 | `features/` | Work-item specifications |
+| `docs/` | Durable repository conventions and workflow guides |
 | `README.md` | Setup and current application/API behavior |
 | `verify.sh` | Repository verification run by CI |
 
