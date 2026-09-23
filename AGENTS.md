@@ -34,6 +34,10 @@ deprecation periods. Document breaking changes in the PR description and move on
 The scoped `AGENTS.md` files own implementation rules for their subtrees; do not copy those rules
 into other documents.
 
+## Feature development workflow
+
+For substantial new features or changes that span API contracts, persistence, backend behavior, and frontend behavior, follow [`docs/feature-development-prompt.md`](docs/feature-development-prompt.md) as the implementation workflow. Use it to drive the work from feature specification and API design, agreed before any implementation, through JSON Schema, domain and database modeling, routing, service and repository implementation, frontend integration, tests, and final verification. It is a workflow guide, not a second source of repository policy: this file, the applicable scoped `AGENTS.md` files, `directory-structure.md`, the shared schemas, and the work item's `features/*.md` specification remain authoritative for their respective concerns, and the most specific repository rule wins if the workflow document conflicts with them.
+
 ## Money
 
 Money is a domain value: an integer amount in the currency's minor unit plus the currency. This
