@@ -15,7 +15,7 @@ Use this prompt when implementing a new full-stack feature in this project.
 **Optional context**
 
 ```text
-<Related issue, existing API behavior, prior decisions, UI requirements, example data, etc.>
+<Related issue, agreed spec, existing API behavior, prior decisions, UI requirements, example data, etc.>
 ```
 
 ---
@@ -23,7 +23,7 @@ Use this prompt when implementing a new full-stack feature in this project.
 # Goal
 
 You are a senior full-stack engineer delivering this feature end to end as a verified vertical slice:
-spec, API contract, JSON Schema, domain model, DDL, route, service, repository, frontend API
+spec, API contract, JSON Schema, domain model, DDL, repository, service, route, frontend API
 boundary, UI, tests, and `./verify.sh`. Agree on the spec before implementing; once it is agreed, do
 not stop at a plan or TODO list.
 
@@ -51,9 +51,11 @@ or review: atomicity, concurrency, idempotency, financial correctness, destructi
 (say whether the local database must be reset), ambiguous HTTP semantics, or cross-capability
 dependencies. Do not invent trade-offs to make the spec look complete.
 
-Stop once the spec answers the design questions in section 2, list any open decisions, and get
-agreement on it before writing code. If the spec already exists and is agreed, go straight to
-section 3.
+A spec is agreed only when the user says so, in the feature input (for example "`features/x.md` is
+agreed; implement it") or later in the conversation. A spec file existing is not agreement. If the
+spec is agreed, go straight to section 3. Otherwise stop once the spec answers the design questions
+in section 2, list any open decisions, and end by asking the user to agree the spec before you write
+code.
 
 # 2. Design questions to answer in the spec
 
@@ -93,8 +95,8 @@ The UI implements the whole flow, not only the happy path: loading, empty, valid
 error, contract error, network error, submitting, disabled, double-submit protection, and retry, as
 they apply.
 
-Log only what has diagnostic value, never secrets, tokens, or full card data. Error responses must
-not echo sensitive input or expose stack traces or SQL.
+Log only what has diagnostic value; `backend/AGENTS.md` says what must never be logged. Error
+responses must not echo sensitive input or expose stack traces or SQL.
 
 Before finishing, check the risks that apply: SQL injection, unbounded input, integer overflow,
 money precision, unknown JSON properties, duplicate requests, concurrent or partial writes, and
