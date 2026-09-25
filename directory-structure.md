@@ -40,7 +40,7 @@ for future code.
 | `verify.sh` | Repository verification run by CI |
 
 Generated output, dependencies, caches, and runtime data are not source directories. Examples
-include `build/`, `.gradle/`, `backend/data/`, `frontend/node_modules/`, and `frontend/dist/`.
+include `build/`, `.gradle/`, `frontend/node_modules/`, and `frontend/dist/`.
 
 ## Backend Placement
 
@@ -61,7 +61,7 @@ explicit decision.
 | Feature query/DML SQL and row mapping | `<capability>/<Feature>Repository.kt` or `<capability>/<Feature><Concern>Repository.kt` |
 | Another capability-owned concern | `<capability>/<Feature><Concern>.kt` |
 | Process entry and manual feature wiring | `Application.kt` |
-| JDBC or SQLite mechanics | `db/` |
+| JDBC or PostgreSQL mechanics | `db/` |
 | Table DDL and seed rows | `db/SchemaInitializer.kt` |
 | HTTP, Ktor, or JSON mechanics | `http/` |
 | An application exception exposed as an HTTP error, for any capability | `http/ApiError.kt`, mapped in `http/ErrorHandling.kt` |

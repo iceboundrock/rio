@@ -50,8 +50,8 @@ jobs:
           cache: true
           cache-dependency-path: frontend/pnpm-lock.yaml
 
-      # Backend tests (real Ktor pipeline, temporary SQLite files, and PostgreSQL in a container
-      # that Testcontainers starts on the runner's Docker daemon, which ubuntu-latest provides),
+      # Backend tests (real Ktor pipeline on PostgreSQL in a container that Testcontainers
+      # starts on the runner's Docker daemon, which ubuntu-latest provides),
       # frontend tests, typecheck and production build. No service containers and no secrets.
       # ORG_GRADLE_PROJECT_jdkVersion overrides the toolchain pin in backend/build.gradle.kts.
       - run: ./verify.sh
