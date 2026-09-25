@@ -25,9 +25,10 @@ tests.
 
 ### One database (T1)
 
-- After #95: `git grep -n -i sqlite -- backend/ .gitignore start.sh stop.sh` → no match.
-  `org.xerial:sqlite-jdbc` and the `--enable-native-access=ALL-UNNAMED` flag, which exists only for
-  sqlite-jdbc, are gone from `backend/build.gradle.kts`.
+- After #95: `git grep -n -i sqlite -- ':!features/' ':!README.md'` → no match; after #96, the same
+  without the README exclusion. `features/` keeps its history. `org.xerial:sqlite-jdbc` and the
+  `--enable-native-access=ALL-UNNAMED` flag, which exists only for sqlite-jdbc, are gone from
+  `backend/build.gradle.kts`.
 - `cd backend && ./gradlew dependencies --configuration runtimeClasspath` → lists
   `org.postgresql:postgresql` and `com.zaxxer:HikariCP`, both pinned (#94).
 - The pool keeps HikariCP's defaults (10 connections), and connections keep PostgreSQL's default
@@ -37,7 +38,7 @@ tests.
 
 | Variable      | Default                                | Meaning                                              |
 |---------------|----------------------------------------|------------------------------------------------------|
-| `DB_URL`      | `jdbc:postgresql://localhost:5432/rio` | JDBC URL of the database; must be `jdbc:postgresql:` |
+| `DB_URL`      | `jdbc:postgresql://localhost:5432/rio` | JDBC URL of the database; must be `jdbc:postgresql:`; never printed |
 | `DB_USER`     | `rio`                                  | Role Rio connects as                                 |
 | `DB_PASSWORD` | `rio`                                  | Its password; never logged or printed                |
 | `PORT`        | `8080`                                 | Unchanged                                            |
@@ -47,14 +48,16 @@ The defaults match the local container (T15), so a developer never sets a variab
 - Local container up, no variables set → `cd backend && ./gradlew run` starts; on an empty database
   `GET /api/card-transactions` returns the 9 seed rows.
 - `DB_URL=jdbc:mysql://h/rio` or `DB_URL=` (empty) → startup fails before the HTTP port is bound,
-  exit code non-zero, message `DB_URL must start with jdbc:postgresql:`. The value is not printed,
-  because it could hold anything.
+  exit code non-zero, message `DB_URL must start with jdbc:postgresql:`.
 - `DB_URL` carrying a `user` or `password` query parameter → startup fails with
-  `DB_URL must not carry credentials; use DB_USER and DB_PASSWORD`. Credentials have one source, and
-  a `DB_URL` that passes validation is safe to print.
+  `DB_URL must not carry credentials; use DB_USER and DB_PASSWORD`. Credentials have one source.
 - Database unreachable, or credentials rejected → startup fails after one connection attempt
-  (no retry loop). The message names `DB_URL` and `DB_USER` and says that `./start.sh` starts the
-  local container. `DB_PASSWORD` appears in no log line or message.
+  (no retry loop). The message gives the host, port and database, the `DB_USER` value, the variable
+  names `DB_URL` and `DB_USER`, and says that `./start.sh` starts the local container.
+- No message or log line prints the value of `DB_URL` or `DB_PASSWORD`. The URL can hold anything,
+  and pgJDBC reads secrets from it that the check above does not reject (`sslpassword`, the client
+  key's password). A message that needs to identify the database prints the host, port and database
+  parsed from the URL, as the drift-guard message does.
 - `RIO_DB_PATH` set → ignored. No code detects it (root `AGENTS.md`: no legacy-detection code), and
   `backend/data/` is no longer created.
 - Backend stopped normally → the pool is closed.
@@ -125,19 +128,28 @@ current DDL, not a hand-written copy.
 - At startup, `SchemaInitializer.initialize` looks in the connection's current schema (`public`) for
   relations of any kind named after the three tables.
   - None found → fresh database: create all three in one transaction, then run the check below.
-  - Any found → describe each table from the catalog: its relation kind; its columns in order, each
-    with its `format_type` type, `NOT NULL` flag and default expression; and the sorted
-    `pg_get_constraintdef` of its constraints. The expected description comes from running the
-    current DDL in one transaction, in a scratch schema placed first on `search_path`, reading the
-    same description there, and rolling back. Any difference → refuse.
+  - Any found → compare two descriptions of each table: its relation kind; its columns in order,
+    each with its `format_type` type, `NOT NULL` flag and default expression; and the sorted
+    `pg_get_constraintdef` of its constraints. The live description is read under the connection's
+    normal `search_path`. The expected description comes from running the current DDL in one
+    transaction, in a scratch schema placed first on `search_path`, reading the same description
+    there, and rolling back. Any difference → refuse.
+- Each side is read while a bare table name resolves to its own tables: the live side before the
+  scratch transaction starts or after it is rolled back, the expected side inside it.
+  `pg_get_constraintdef` (and `pg_get_expr` for defaults) schema-qualifies any relation or
+  non-`pg_catalog` function that a bare name would not resolve to on the current `search_path`.
+  Read while the scratch schema is first on the path, the live foreign keys render as
+  `REFERENCES public.card_transactions(id)` and the scratch ones as
+  `REFERENCES card_transactions(id)`, so every start would refuse, including the one that just
+  created the tables. Nothing is normalized after rendering.
 - The DDL constant is the single source of truth. Both sides are rendered by PostgreSQL, so DDL
   formatting and PostgreSQL's normalization cannot cause a false mismatch. For example, `IN (...)` is
   stored as `= ANY (ARRAY[...])`.
 - The guard does not compare non-constraint indexes, triggers, grants, `REPLICA IDENTITY`,
   publication membership or constraint names. Tests add a trigger (#95), and Phase 2 may set replica
   identity or publications. None of these changes what Rio reads or writes.
-- Refusing means startup fails with a non-zero exit before any DDL runs. The message names the table
-  and ends with reset instructions that name the database, not a file:
+- Refusing means startup fails with a non-zero exit before any DDL touches the existing tables. The
+  message names the table and ends with reset instructions that name the database, not a file:
   `Stop the backend and recreate database rio on localhost:5432 (for the ./start.sh container:
   docker rm -f rio-postgres && docker volume rm rio-postgres-data, then ./start.sh). This resets
   local card transactions to demo data; back up data you need first.` Host, port and database come
@@ -148,6 +160,8 @@ current DDL, not a hand-written copy.
 
 Checks (#95 ports the existing `SchemaInitializerTest` cases, and #97 adds the type regressions):
 
+- Tables created by a previous start, restart → starts normally and creates nothing. This is the
+  check that fails if the live side is read while the scratch schema is on `search_path`.
 - `ALTER TABLE card_transactions DROP COLUMN status`, restart → exits non-zero, naming
   `card_transactions` and giving the reset steps; the table and its rows are unchanged.
 - `amount_minor` altered to `integer`, or `created_at` altered to `text` → refused in the same way.
@@ -170,16 +184,21 @@ Checks (#95 ports the existing `SchemaInitializerTest` cases, and #97 adds the t
 - The API's `createdAt` format is unchanged. It is still `Instant.toString()`, it still matches the
   `card-transaction.schema.json` pattern, and seed rows print exactly as before
   (`2026-09-01T09:00:00Z`). Only digits after the sixth fractional digit are lost.
-- `ORDER BY created_at DESC, id DESC` now orders by time instead of by ISO-8601 text. The two differ
-  only for rows in the same second whose fractions have different lengths (`…:00.5Z` vs
-  `…:00.123456Z`), which the TEXT column sorted wrongly.
+- `ORDER BY created_at DESC, id DESC` now orders by time instead of by ISO-8601 text. The TEXT
+  column held `Instant.toString()`, which prints the fraction in groups of three digits, so text
+  order was wrong only when, within one second, the shorter rendering is a prefix of the longer:
+  `Z` sorts after `.` and after every digit, so `…:00Z` sorted after `…:00.123Z`, and `…:00.500Z`
+  after `…:00.500001Z`. Fractions of different length that differ in a shared digit (`…:00.500Z`
+  vs `…:00.123456Z`) were already ordered correctly.
 
 Checks (#97):
 
 - Service clock at `2026-09-10T18:00:00.123456789Z`, create then replay → equal objects, and
   byte-identical HTTP bodies with `createdAt` `2026-09-10T18:00:00.123456Z`.
 - Repository writes `…:00.9999996Z` → reads back `…:00.999999Z`.
-- Two rows at `…:00.5Z` and `…:00.123456Z` → the `.5` row is listed first.
+- Two rows at `…:00Z` and `…:00.123Z` → the `.123` row is listed first; two rows at `…:00.500Z` and
+  `…:00.500001Z` → the `.500001` row first. Both pairs are ones the TEXT column mis-sorted, so the
+  check fails against any text ordering, such as `created_at::text`.
 
 ### Idempotency under concurrency
 
@@ -205,14 +224,20 @@ many threads with distinct keys (all 201, none 500).
 
 PostgreSQL `text` cannot hold U+0000. Inserting it fails with SQLSTATE 22021, which Rio would answer
 as a 500. SQLite stores and returns the character today. `description` is the only column whose text
-comes from the client. The `Idempotency-Key` header cannot contain U+0000, because Netty rejects C0
-control characters in headers.
+comes from the client. The `Idempotency-Key` header cannot carry U+0000, because the route already
+rejects a key containing any ISO control character before it reads the body
+(`CardTransactionRoutes.idempotencyKey`).
 
 - `POST` with `"description": "a\u0000b"` → 400 `VALIDATION_ERROR`
   `description must not contain U+0000`. The check runs in `CardTransactionService` normalization with
   the other description rules, so nothing is written and the key is not consumed.
   `create-card-transaction-request.schema.json` gets the same rule, so the frontend's validator
   refuses the request first. Delivered in #95, because the cutover is what introduces the 500.
+- Per `contracts/AGENTS.md`, the schema changes first, `validators.generated.{js,d.ts}` are
+  regenerated and committed, and the README API section records the error. `description` already
+  carries `pattern: \S`, and a schema object takes one `pattern`, so the U+0000 rule is a second
+  subschema (`not` with a pattern, or `allOf`) whose escape joni and Ajv read alike;
+  `JsonSchemaAssertionsTest` gets a case for the new construct (#68).
 
 ### Local development (T15)
 
@@ -263,11 +288,12 @@ nothing depends on `docker-compose.cdc.yml`.
 
 ### Records that change with the behaviour
 
-The PR that changes a behaviour also updates its authoritative record:
+The PR that changes a behaviour also updates its authoritative record. The T1 grep above is the
+check that none is missed:
 
-- README: Quick start, prerequisites, configuration table, reset instructions and "Where things are".
-  The API section changes only for the N1 error.
-- `backend/AGENTS.md`:
+- README (#96): Quick start, prerequisites, configuration table, reset instructions and "Where things
+  are". The API section changes only for the N1 error (#95).
+- `backend/AGENTS.md` (#95):
   - the layering line;
   - the DDL-and-reset rule;
   - the drift-guard paragraph;
@@ -275,9 +301,13 @@ The PR that changes a behaviour also updates its authoritative record:
   - `amount_minor BIGINT`;
   - the busy-timeout paragraph, which becomes row locks and the pool;
   - Tests.
-- `directory-structure.md`: `backend/data/` removed from the runtime-data examples, and a `docker/`
-  row added (T10, #96).
-- CI workflow comment and `verify.sh` header: Docker is required.
+- Root `AGENTS.md` (#95): the repository map's `backend/` row says "over SQLite". #96 adds the
+  `docker/` row (T10).
+- `directory-structure.md` (#95): the `db/` placement row says "JDBC or SQLite mechanics", and
+  `backend/data/` is removed from the runtime-data examples. #96 adds the `docker/` row (T10).
+- `frontend/src/money/money.ts` (#95): the `MAX_WIRE_AMOUNT` comment justifies the limit by
+  "SQLite INTEGER"; it becomes PostgreSQL `BIGINT`. A comment is not a frontend change under NG4.
+- CI workflow comment and `verify.sh` header (#94): Docker is required.
 
 ## Acceptance Criteria
 
@@ -286,7 +316,7 @@ The PR that changes a behaviour also updates its authoritative record:
       (AC1 as revised).
 - [ ] Nothing set, container up, `cd backend && ./gradlew run` → serves the same 9 rows.
 - [ ] Invalid `DB_URL`, credentials in `DB_URL`, or an unreachable database → non-zero exit with the
-      messages above; the password is never printed.
+      messages above; neither the password nor the URL value is printed.
 - [ ] The tables match the DDL above; a 9,000,000,000 JPY amount round-trips.
 - [ ] Every drift-guard check above behaves as stated.
 - [ ] Create and replay with a nanosecond clock → byte-identical bodies with a microsecond
@@ -294,7 +324,8 @@ The PR that changes a behaviour also updates its authoritative record:
 - [ ] Concurrent same-key and distinct-key creates behave as stated, with no 500.
 - [ ] N1: a U+0000 description → 400 `VALIDATION_ERROR`, nothing persisted, key not consumed.
 - [ ] `./stop.sh` then `./start.sh` → rows kept; the reset steps → the 9 seed rows again.
-- [ ] No SQLite code, dependency or test remains, and no pre-existing test class was deleted.
+- [ ] `git grep -n -i sqlite -- ':!features/'` → no match, and no pre-existing test class was
+      deleted.
 - [ ] `./verify.sh` with Docker running passes locally and in all three CI jobs.
 
 ## Non-goals
@@ -330,6 +361,7 @@ These go in the description of the PR that introduces each one:
 | AC1 | `./gradlew run` still starts on SQLite and behaves exactly as today. | `./start.sh` starts a local PostgreSQL container, the backend and the UI, and the API behaves exactly as it did on SQLite. |
 | P1.2 | A `DatabaseFactory` selects SQLite or PostgreSQL from `DB_URL`. | `db/Database.kt` builds the PostgreSQL pool from `DB_URL`; there is nothing to select. |
 | P1.3 | Review Exposed table definitions on both databases. | Review the raw DDL in `db/SchemaInitializer.kt` and the repositories' SQL (D1). |
+| P1.4 | PostgreSQL init SQL (`docker/postgres-rio/init.sql`): tables, publication, CDC user and grants. | `init.sql` holds the CDC role, its grants and a schema-wide publication; tables come from `SchemaInitializer` (T2). |
 | P1.5 | Core API behaves identically on PostgreSQL and SQLite. | Core API behaves identically to the pre-migration behaviour, pinned by the ported suite (#95) and PostgreSQL regression tests (#97). |
 
 ## Open decisions
@@ -372,4 +404,6 @@ this spec accepts all four.
 - If PostgreSQL goes away while the backend runs, requests wait up to HikariCP's connection timeout
   (30 s) and then answer 500 `internal server error`. They recover once it is back, with no restart.
 - The `postgres:17` tag appears twice: in `start.sh` and in the test fixture. A tag bump changes
-  both in the same PR.
+  both in the same PR, and from `postgres:18` also the T15 mount point: that image moved the data
+  directory to `/var/lib/postgresql/18/docker` and documents mounting the volume at
+  `/var/lib/postgresql`.
