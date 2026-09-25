@@ -45,22 +45,55 @@ tests.
 
 The defaults match the local container (T15), so a developer never sets a variable.
 
+`DB_URL` is parsed once, by pgJDBC's own parser `org.postgresql.Driver.parseURL(url, null)`, before
+the pool is built, and by nothing else. The checks and messages below read the properties it
+returns: `PGHOST`, `PGPORT`, `PGDBNAME`, and one key per query parameter. Rio and the driver then
+never disagree about what a URL means. A hand-written parser would: `java.net.URI` returns no host
+for `jdbc:postgresql:rio` (host `localhost`, port `5432` to the driver) or for
+`jdbc:postgresql://h1:5432,h2:5433/rio` (two hosts).
+
 - Local container up, no variables set → `cd backend && ./gradlew run` starts; on an empty database
   `GET /api/card-transactions` returns the 9 seed rows.
 - `DB_URL=jdbc:mysql://h/rio` or `DB_URL=` (empty) → startup fails before the HTTP port is bound,
   exit code non-zero, message `DB_URL must start with jdbc:postgresql:`.
-- `DB_URL` carrying a `user` or `password` query parameter → startup fails with
-  `DB_URL must not carry credentials; use DB_USER and DB_PASSWORD`. Credentials have one source.
+- The prefix is right but the parser rejects the URL (`jdbc:postgresql://localhost:54x/rio`, or
+  `jdbc:postgresql://localhost:5432` with no `/` after the port) → startup fails before the pool is
+  built, message `DB_URL is not a valid PostgreSQL JDBC URL`. Handed to HikariCP instead, the URL
+  fails inside the pool with the URL value in the exception message.
+- The parsed properties contain a `user` or `password` key → startup fails with
+  `DB_URL must not carry credentials; use DB_USER and DB_PASSWORD`. Credentials have one source, and
+  a `password=` query parameter would otherwise override `DB_PASSWORD`. `PASSWORD=` or `pass%77ord=`
+  land under other keys that the driver never reads, so they pass.
 - Database unreachable, or credentials rejected → startup fails after one connection attempt
   (no retry loop). The message gives the host, port and database, the `DB_USER` value, the variable
   names `DB_URL` and `DB_USER`, and says that `./start.sh` starts the local container.
-- No message or log line prints the value of `DB_URL` or `DB_PASSWORD`. The URL can hold anything,
-  and pgJDBC reads secrets from it that the check above does not reject (`sslpassword`, the client
-  key's password). A message that needs to identify the database prints the host, port and database
-  parsed from the URL, as the drift-guard message does.
+- No message or log line, on stdout or stderr, prints the value of `DB_URL` or `DB_PASSWORD`. The
+  URL can hold anything, and pgJDBC reads secrets from it that the check above does not reject
+  (`sslpassword`, the client key's password). A message that needs to identify the database prints
+  `PGHOST`, `PGPORT` and `PGDBNAME` as parsed, as the drift-guard message does: `localhost:5432` for
+  `jdbc:postgresql:rio`, and every host and port for a multi-host URL.
+- The parser reports a rejected URL as a `WARNING` through `java.util.logging`, which Rio does not
+  route to logback, so it reaches stderr in JUL's own format. For a URL with no `/` after the host
+  or port, or with too many, that line holds the whole URL. `Database.kt` therefore parses with the
+  `org.postgresql.Driver` JUL logger raised to `SEVERE` and restores its level afterwards, holding
+  the logger in a local while it does: JUL keeps loggers weakly, and a level set on an unreferenced
+  logger is lost at the next collection. The driver's other warnings from that logger (an unknown
+  `?service=` name, a `loginTimeout` that does not parse) and the bad-port warning from
+  `org.postgresql.util.PGPropertyUtil` never include the URL.
 - `RIO_DB_PATH` set → ignored. No code detects it (root `AGENTS.md`: no legacy-detection code), and
   `backend/data/` is no longer created.
 - Backend stopped normally → the pool is closed.
+
+Checks (#94, no container needed):
+
+- Each rejected URL above (`jdbc:mysql://h/rio`, empty, `…:54x/rio`, `…:5432` without `/`, and
+  `?user=x&password=y`) → `Database.kt` refuses it with the stated message before any connection is
+  attempted, and nothing written to stdout or stderr, JUL output included, contains the URL value or
+  `DB_PASSWORD`.
+- `jdbc:postgresql:rio` and `jdbc:postgresql://h1:5432,h2:5433/rio` → pass validation, which a
+  hand-written parser would fail.
+- `jdbc:postgresql://127.0.0.1:1/rio` → the unreachable-database message after one attempt, naming
+  `127.0.0.1:1` and `rio`.
 
 ### Code placement
 
@@ -276,8 +309,18 @@ nothing depends on `docker-compose.cdc.yml`.
 ### Tests (T5)
 
 - Backend tests start their own `postgres:17` through Testcontainers (#94): one container per test
-  JVM, and a fresh database per test class. `./gradlew test` and `./verify.sh` need a running Docker
-  daemon and nothing else: no `DB_URL` and no local container.
+  JVM, started on first use and shared by every class. `./gradlew test` and `./verify.sh` need a
+  running Docker daemon and nothing else: no `DB_URL` and no local container.
+- Every test method starts on an empty database, with no relation in `public`, as the temporary
+  SQLite file opened in each `@BeforeTest` gives today. The ported suite depends on that
+  granularity: `JdbcTemplateTest` and `TransactionalServiceTest` run `CREATE TABLE items` before
+  each test, `CardTransactionServiceTest` reuses `key-1` across cases with different payloads and
+  asserts that `findAll()` is empty or holds one row, and every `SchemaInitializerTest` case starts
+  on the fresh path. A database per class fails all of them. Whether #94 creates a database per test
+  or drops and recreates `public` is its choice; in review, both measured under 15 ms on
+  PostgreSQL 17.
+- #94's smoke test shows the isolation the suite needs: two tests in one class each create the
+  same table and insert a row, and neither sees the other's.
 - Docker stopped, `cd backend && ./gradlew test` → fails with Testcontainers'
   `Could not find a valid Docker environment`, not a hang.
 - Every backend test class that exists before #95 still exists and passes after it; none is deleted
@@ -315,8 +358,9 @@ check that none is missed:
       UI start; `curl -s localhost:8080/api/card-transactions | jq '.items | length'` → `9`
       (AC1 as revised).
 - [ ] Nothing set, container up, `cd backend && ./gradlew run` → serves the same 9 rows.
-- [ ] Invalid `DB_URL`, credentials in `DB_URL`, or an unreachable database → non-zero exit with the
-      messages above; neither the password nor the URL value is printed.
+- [ ] Invalid `DB_URL` (wrong prefix, or rejected by pgJDBC's parser), credentials in `DB_URL`, or
+      an unreachable database → non-zero exit with the messages above; neither the password nor
+      the URL value is printed on stdout or stderr.
 - [ ] The tables match the DDL above; a 9,000,000,000 JPY amount round-trips.
 - [ ] Every drift-guard check above behaves as stated.
 - [ ] Create and replay with a nanosecond clock → byte-identical bodies with a microsecond
@@ -399,8 +443,13 @@ this spec accepts all four.
 ## Notes / Decisions
 
 - Rows sharing a `created_at` (items of one batch) are tie-broken by `id DESC` under the database's
-  collation instead of SQLite's byte order. The ids are random UUIDs, so this order was arbitrary
-  before and stays deterministic now. Nothing depends on it.
+  collation (`en_US.utf8` in `postgres:17`) instead of SQLite's byte order. The ids are random
+  UUIDs, so this order was arbitrary before and stays deterministic now. `CardTransactionServiceTest`
+  compares a batch with `sortedByDescending { it.id }`, Kotlin's UTF-16 code-unit order, which
+  agrees with the collation only because the ids are lowercase hex. Hand-picked ids break that:
+  `ORDER BY id DESC` returns `tx-B, tx-a, tx_2, tx-1`, and Kotlin sorts `tx_2, tx-a, tx-B, tx-1`. A
+  same-instant test in #95 or #97 that chooses its own ids therefore uses UUID-shaped ids, or asserts
+  membership without order.
 - If PostgreSQL goes away while the backend runs, requests wait up to HikariCP's connection timeout
   (30 s) and then answer 500 `internal server error`. They recover once it is back, with no restart.
 - The `postgres:17` tag appears twice: in `start.sh` and in the test fixture. A tag bump changes
