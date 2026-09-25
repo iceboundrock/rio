@@ -86,7 +86,7 @@ export function moneyToJson(money: Money): MoneyJson {
 
 /**
  * Largest minor-unit amount the backend accepts: it stores amounts as a signed 64-bit integer
- * (Kotlin Long, SQLite INTEGER). This is a wire limit, not a property of Money, which stays an
+ * (Kotlin Long, PostgreSQL BIGINT). This is a wire limit, not a property of Money, which stays an
  * unbounded bigint; forms mirror it so an overflow is reported per row instead of by the server.
  */
 export const MAX_WIRE_AMOUNT = 9223372036854775807n;

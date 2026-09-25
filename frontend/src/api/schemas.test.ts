@@ -46,6 +46,18 @@ describe("card transaction schemas", () => {
     expect(validateCreateCardTransactionRequest({ description: "Lunch", amount: { amount: "1800", currency: "USD" }, type: "DEBIT" })).toBe(true);
   });
 
+  // The same cases as JsonSchemaAssertionsTest, so both engines are shown to read the \u0000 escape as U+0000.
+  it("rejects U+0000 in a request description and nothing else", () => {
+    const withDescription = (description: string) => ({ description, amount: { amount: "1800", currency: "USD" }, type: "DEBIT" });
+    for (const description of ["a\u0000b", "\u0000", "Lunch\u0000"]) {
+      expect(validateCreateCardTransactionRequest(withDescription(description))).toBe(false);
+      expect(validateCreateCardTransactionsRequest([withDescription(description)])).toBe(false);
+    }
+    for (const description of ["u0000", "\\u0000", "\u0001", "0"]) {
+      expect(validateCreateCardTransactionRequest(withDescription(description))).toBe(true);
+    }
+  });
+
   it("require positive magnitudes for card transactions", () => {
     expect(validateCardTransaction({ ...validCardTransaction, amount: { amount: "0", currency: "USD" } })).toBe(false);
     expect(validateCardTransaction({ ...validCardTransaction, amount: { amount: "-525", currency: "USD" } })).toBe(false);
