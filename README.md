@@ -10,7 +10,7 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash). No Docker, no external database.
+Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash). Running the app needs no Docker and no external database; the backend tests need Docker (see [Tests and verification](#tests-and-verification)).
 
 ```bash
 ./start.sh               # both at once; Ctrl+C stops both
@@ -42,6 +42,12 @@ cd frontend && pnpm run preview       # serve the build under Content-Security-P
 ./verify.sh                           # everything CI runs, from the repo root
 ```
 
+Backend tests need a running Docker daemon. `PostgresTestDatabase` (in the backend's `db` test package)
+starts one `postgres:17` container per test run through Testcontainers, gives each test method its own
+empty database in it, and the container is removed when the run ends; no `DB_URL` or local container is
+involved, and the first run pulls the image. Without Docker, the tests that use it fail with Testcontainers'
+`Could not find a valid Docker environment`; the rest still run on temporary SQLite files.
+
 `pnpm test` and `pnpm run build` first regenerate `frontend/src/api/validators.generated.{js,d.ts}` from
 `contracts/schemas` (`pnpm run generate:validators`). The generated files are checked in; `./verify.sh`
 fails when they do not match the schemas, and runs the frontend tests with Node's
@@ -57,7 +63,9 @@ the `jdkVersion` Gradle property) on a single Node version (Node only drives the
 toolchain; the React app never runs on it). That version is exactly 24.21.0, the floor of the
 `engines.node` range in `frontend/package.json`, so a newer-than-floor Node API sneaking into
 the build or test setup fails in CI; local development on a newer Node covers the other end.
-No external services and no secrets: backend tests create temporary SQLite files. When a run
+No secrets and no service containers: backend tests create temporary SQLite files, and the
+PostgreSQL tests start their own container through Testcontainers on the Docker daemon that
+GitHub's `ubuntu-latest` runners provide. Nothing is cached, so each job pulls `postgres:17`. When a run
 fails, the backend HTML and XML test reports are uploaded as a
 `backend-test-reports-jdk-<version>` artifact.
 
