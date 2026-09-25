@@ -1,6 +1,7 @@
 #!/bin/sh
-# Starts backend (http://localhost:8080) and frontend (http://localhost:5173) together.
-# Ctrl+C stops both. Requires: JDK 25, Node 24 (>=24.21.0, the current LTS), pnpm (see README.md).
+# Starts PostgreSQL (the rio-postgres container), backend (http://localhost:8080) and frontend
+# (http://localhost:5173) together. Ctrl+C stops all three; a container that was already running is
+# reused and left running. Requires: Docker, JDK 25, Node 24 (>=24.21.0, the current LTS), pnpm (see README.md).
 set -eu
 
 cd "$(dirname "$0")"
@@ -24,6 +25,16 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
+PG_CONTAINER=rio-postgres
+# postgres:17 is also the image the backend tests use (PostgresTestDatabase); bump both together.
+PG_IMAGE=postgres:17
+PG_STARTED=
+
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  echo "==> Docker is required: the backend runs on PostgreSQL in the $PG_CONTAINER container. Install or start Docker and retry." >&2
+  exit 1
+fi
+
 # Not --frozen-lockfile, unlike verify.sh and CI: this is the dev path, so a package.json edited
 # since the last install should update pnpm-lock.yaml here rather than fail. pnpm freezes it by
 # itself when it detects a CI environment.
@@ -31,6 +42,42 @@ if [ ! -d frontend/node_modules ]; then
   echo "==> frontend: pnpm install"
   (cd frontend && pnpm install --loglevel=error)
 fi
+
+# Stops the container only if this run started it; --rm removes it and the named volume keeps the data.
+stop_postgres() {
+  [ -n "$PG_STARTED" ] || return 0
+  PG_STARTED=
+  echo "==> postgres: docker stop $PG_CONTAINER   (data stays in volume rio-postgres-data)"
+  docker stop "$PG_CONTAINER" >/dev/null || true
+}
+
+if [ "$(docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null)" = true ]; then
+  echo "==> postgres: reusing running container $PG_CONTAINER (left running on exit)"
+else
+  # Loopback only: the password is a fixed local default. wal_level=logical is for the CDC pipeline (#115).
+  echo "==> postgres: docker run $PG_CONTAINER   (127.0.0.1:5432, volume rio-postgres-data)"
+  docker run -d --rm --name "$PG_CONTAINER" \
+    -p 127.0.0.1:5432:5432 \
+    -v rio-postgres-data:/var/lib/postgresql/data \
+    -e POSTGRES_USER=rio -e POSTGRES_PASSWORD=rio -e POSTGRES_DB=rio \
+    "$PG_IMAGE" -c wal_level=logical >/dev/null
+  PG_STARTED=1
+fi
+trap stop_postgres EXIT
+trap 'exit 1' INT TERM
+
+# Over TCP, not the socket: on first start the image initializes the database with a temporary
+# server that accepts only socket connections, then restarts it.
+waited=0
+until docker exec "$PG_CONTAINER" pg_isready -q -h 127.0.0.1 -U rio -d rio; do
+  waited=$((waited + 1))
+  if [ "$waited" -ge 30 ]; then
+    echo "==> postgres: not ready after 30s; last log lines:" >&2
+    docker logs --tail 20 "$PG_CONTAINER" >&2 || true
+    exit 1
+  fi
+  sleep 1
+done
 
 echo "==> backend: ./gradlew run   (http://localhost:8080)"
 (cd backend && exec ./gradlew run --quiet --console=plain) &
@@ -69,6 +116,8 @@ stop() {
   done
   kill -KILL $pids 2>/dev/null || true
   wait 2>/dev/null || true
+  # After the backend, so its pool is gone before the server stops.
+  stop_postgres
 }
 trap stop INT TERM EXIT
 

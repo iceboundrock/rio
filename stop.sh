@@ -1,6 +1,7 @@
 #!/bin/sh
 # Stops the backend and frontend launched by ./start.sh by asking that run to shut down;
-# its trap kills both servers (up to ~5s grace, then SIGKILL) and removes the pid file.
+# its trap kills both servers (up to ~5s grace, then SIGKILL), stops the PostgreSQL container if
+# that run started it, and removes the pid file.
 set -eu
 
 cd "$(dirname "$0")"
@@ -30,9 +31,10 @@ fi
 
 echo "==> stopping ./start.sh (pid $pid)"
 kill -TERM "$pid"
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+# 20s: the servers' grace period plus `docker stop` of the container.
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   kill -0 "$pid" 2>/dev/null || { echo "==> stopped"; exit 0; }
   sleep 1
 done
-echo "==> ./start.sh (pid $pid) is still running after 10s" >&2
+echo "==> ./start.sh (pid $pid) is still running after 20s" >&2
 exit 1
