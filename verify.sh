@@ -1,7 +1,8 @@
 #!/bin/sh
 # Runs everything CI would: backend tests, frontend tests, frontend production build.
 # Requires: JDK 25, Node 24 (>=24.21.0, the current LTS), pnpm (the version pinned by `packageManager` in
-# frontend/package.json; `corepack enable pnpm` provides it). Nothing here is needed to run the app itself.
+# frontend/package.json; `corepack enable pnpm` provides it), and a running Docker daemon, because backend
+# tests start PostgreSQL in a container through Testcontainers. Nothing here is needed to run the app itself.
 set -eu
 
 cd "$(dirname "$0")"

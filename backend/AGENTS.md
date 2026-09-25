@@ -72,7 +72,7 @@ belongs in that work item's specification; do not infer it from this endpoint.
 
 ## Tests
 
-- Tests run with `./gradlew test` from `backend/` and use real components: `Database.open` on a temporary SQLite file for repositories and services, and `testApplication` for routes.
+- Tests run with `./gradlew test` from `backend/` and use real components: `Database.open` on a temporary SQLite file for repositories and services, and `testApplication` for routes. A test that needs PostgreSQL takes an empty database per test method from `db/PostgresTestDatabase.kt` (Testcontainers), so `./gradlew test` needs a running Docker daemon.
 - Route tests must validate application-generated JSON responses with `JsonSchemaAssertions` (`assertMatchesSchema` / `assertViolatesSchema`) against the files in `contracts/schemas/`. For bodyless or engine-generated responses, assert the applicable status, headers, or body directly.
 - A change to a financial invariant needs automated coverage for the cases that apply: precision and rounding per currency, mixed currencies, zero, negative and boundary amounts, `Long` overflow, transaction rollback, concurrent execution, and duplicate or retried requests. Behaviour that depends on transaction semantics is tested through the database, not with mocks: `CardTransactionServiceTest` forces a mid-transaction failure with a SQLite trigger and races real threads on one file.
 - Financially significant operations stay traceable. If a task adds audit logging, log a structured record with the actor, the operation, amount and currency, the transaction or correlation identifier, the idempotency key if any, and the outcome; never log secrets or full card data.
