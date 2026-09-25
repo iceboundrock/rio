@@ -10,6 +10,7 @@ import ai.project.rio.http.atItemIndex
 import ai.project.rio.money.Money
 import java.time.Clock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -25,14 +26,19 @@ import java.util.UUID
  *   already taken   -> same fingerprint and shape: return the stored card transactions (a replay)
  *                      different: IdempotencyConflictException, nothing written
  *
- * The claim is deliberately the first statement of the transaction. SQLite lets a transaction that
- * has only read wait for the writer, but a transaction that read first and then wants to write can
- * fail with SQLITE_BUSY instead of waiting; claiming first means a concurrent caller blocks on the
- * winner's commit and then sees its row. A rollback for any reason takes the claim with it.
+ * The claim is deliberately the first statement of the transaction. Under READ COMMITTED, a
+ * concurrent caller's claim waits on the winner's uncommitted row: if the winner commits, the claim
+ * affects nothing and the caller's next statement takes a new snapshot that sees the winner's record
+ * and rows; if the winner rolls back, the claim succeeds and the caller creates. A rollback for any
+ * reason takes the claim with it. A waiting caller holds no lock before its claim, so this cannot
+ * deadlock.
  *
- * A replay pays for that too: the no-op claim still opens a write transaction, so replays serialize
- * with creates. That is what makes a replay read the winner's committed rows and never a partial
- * state; do not replace the claim with a SELECT fast path.
+ * A replay goes through the same claim, so a replay of a key still in flight waits for its commit.
+ * That is what makes a replay read the winner's committed rows and never a partial state; do not
+ * replace the claim with a SELECT fast path.
+ *
+ * `createdAt` is stamped at microseconds, the precision `timestamptz` stores, so the first response
+ * carries the same instant as every replay read back from the database.
  */
 class CardTransactionService(
     jdbc: JdbcTemplate,
@@ -68,7 +74,7 @@ class CardTransactionService(
     }
 
     private fun createIdempotent(idempotencyKey: String, shape: RequestShape, items: List<NewCardTransaction>): List<CardTransaction> {
-        val createdAt = Instant.now(clock)
+        val createdAt = Instant.now(clock).truncatedTo(ChronoUnit.MICROS)
         val fingerprint = CardTransactionRequestFingerprint.of(shape, items)
         return transactional { tx ->
             val idempotency = CardTransactionIdempotencyRepository(tx)
@@ -97,6 +103,8 @@ class CardTransactionService(
         // not Kotlin's; the same set is trimmed so what is stored is what the check looked at.
         val description = item.description.trim(EcmaScript::isWhitespace)
         if (description.isEmpty()) throw ValidationException("description must not be blank")
+        // PostgreSQL text cannot hold U+0000; refused here so it is a 400 with nothing written, not a 500.
+        if ('\u0000' in description) throw ValidationException("description must not contain U+0000")
         if (!item.amount.isPositive) throw ValidationException("amount must be positive")
         return item.copy(description = description)
     }

@@ -1,7 +1,5 @@
 package ai.project.rio.db
 
-import java.nio.file.Files
-import java.nio.file.Path
 import java.sql.SQLException
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -11,7 +9,7 @@ import kotlin.test.assertFailsWith
 
 class TransactionalServiceTest {
 
-    private lateinit var dbFile: Path
+    private lateinit var db: PostgresTestDatabase
     private lateinit var jdbc: JdbcTemplate
     private lateinit var service: ItemService
 
@@ -25,15 +23,15 @@ class TransactionalServiceTest {
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("transactional-service-test", ".db")
-        jdbc = Database.open(dbFile)
+        db = PostgresTestDatabase.create()
+        jdbc = db.open()
         jdbc.update("CREATE TABLE items (id INTEGER PRIMARY KEY)")
         service = ItemService(jdbc)
     }
 
     @AfterTest
     fun tearDown() {
-        Files.deleteIfExists(dbFile)
+        db.close()
     }
 
     private fun ids(): List<Int> = jdbc.query("SELECT id FROM items ORDER BY id") { it.getInt("id") }

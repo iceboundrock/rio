@@ -4,11 +4,11 @@ import ai.project.rio.db.JdbcExecutor
 import ai.project.rio.money.Currency
 import ai.project.rio.money.Money
 import java.sql.ResultSet
-import java.time.Instant
+import java.time.OffsetDateTime
 
 /**
  * All card transaction SQL lives here. The repository owns the mapping between the
- * SQLite row shape (amount_minor INTEGER + currency TEXT) and the domain [Money] value.
+ * row shape (amount_minor BIGINT + currency TEXT) and the domain [Money] value.
  *
  * Pass a [ai.project.rio.db.JdbcTemplate] for standalone calls, or the executor from
  * `jdbc.withTransaction { tx -> CardTransactionRepository(tx) }` to take part in a transaction.
@@ -36,7 +36,7 @@ class CardTransactionRepository(private val jdbc: JdbcExecutor) {
                 cardTransaction.amount.currency.code,
                 cardTransaction.type.name,
                 cardTransaction.status.name,
-                cardTransaction.createdAt.toString(),
+                cardTransaction.createdAt,
             ),
         )
     }
@@ -50,6 +50,6 @@ class CardTransactionRepository(private val jdbc: JdbcExecutor) {
         ),
         type = CardTransactionType.valueOf(rs.getString("type")),
         status = CardTransactionStatus.valueOf(rs.getString("status")),
-        createdAt = Instant.parse(rs.getString("created_at")),
+        createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
     )
 }

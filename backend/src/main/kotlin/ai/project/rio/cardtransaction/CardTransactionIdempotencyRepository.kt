@@ -27,7 +27,7 @@ class CardTransactionIdempotencyRepository(private val jdbc: JdbcExecutor) {
             VALUES (?, ?, ?, ?)
             ON CONFLICT(idempotency_key) DO NOTHING
             """.trimIndent(),
-            listOf(idempotencyKey, requestFingerprint, requestShape.name, createdAt.toString()),
+            listOf(idempotencyKey, requestFingerprint, requestShape.name, createdAt),
         ) == 1
 
     fun find(idempotencyKey: String): IdempotencyRecord? =

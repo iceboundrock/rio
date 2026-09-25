@@ -3,33 +3,21 @@ package ai.project.rio.db
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import com.zaxxer.hikari.pool.HikariPool
-import java.nio.file.Path
-import java.sql.Connection
-import java.sql.DriverManager
 import java.util.Properties
 import java.util.logging.Level
 import java.util.logging.Logger
 import org.postgresql.Driver
 import org.postgresql.PGProperty
-import org.sqlite.SQLiteConfig
 
 /**
- * The one place database connections are configured.
- *
- * PostgreSQL, [open] with a URL: `DB_URL` is checked with pgJDBC's own URL parser, then a HikariCP
- * pool is built with HikariCP's defaults (10 connections), and connections keep PostgreSQL's default
- * READ COMMITTED isolation. Messages identify the database by its parsed [DatabaseAddress], never by
- * the URL, which can hold secrets.
- *
- * SQLite, [open] with a path; the application still runs on it. Every connection gets:
- * - foreign keys enforced (unused by the starter schema, but on from day one);
- * - a busy timeout so concurrent writers wait instead of failing immediately.
+ * The one place database connections are configured. `DB_URL` is checked with pgJDBC's own URL
+ * parser, then a HikariCP pool is built with HikariCP's defaults (10 connections), and connections
+ * keep PostgreSQL's default READ COMMITTED isolation. Messages identify the database by its parsed
+ * [DatabaseAddress], never by the URL, which can hold secrets.
  */
 object Database {
 
     private const val POSTGRESQL_PREFIX = "jdbc:postgresql:"
-
-    fun open(path: Path): JdbcTemplate = JdbcTemplate { connect(path) }
 
     /**
      * Checks [url] (see [address]), then builds the pool. Building it opens one connection (HikariCP's
@@ -53,7 +41,7 @@ object Database {
                 e,
             )
         }
-        return PooledDatabase(dataSource)
+        return PooledDatabase(dataSource, address)
     }
 
     /**
@@ -92,14 +80,6 @@ object Database {
             logger.level = level
         }
     }
-
-    private fun connect(path: Path): Connection {
-        val config = SQLiteConfig().apply {
-            enforceForeignKeys(true)
-            setBusyTimeout(5_000)
-        }
-        return DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}", config.toProperties())
-    }
 }
 
 /**
@@ -110,9 +90,13 @@ data class DatabaseAddress(val servers: String, val database: String)
 
 /**
  * A PostgreSQL connection pool. [jdbc] borrows a connection per call, or one for a whole
- * `withTransaction` block, and returns it afterwards; [close] shuts the pool down.
+ * `withTransaction` block, and returns it afterwards; [close] shuts the pool down. [address] is
+ * where it points, for messages that must name the database without printing `DB_URL`.
  */
-class PooledDatabase internal constructor(private val dataSource: HikariDataSource) : AutoCloseable {
+class PooledDatabase internal constructor(
+    private val dataSource: HikariDataSource,
+    val address: DatabaseAddress,
+) : AutoCloseable {
 
     val jdbc = JdbcTemplate(openConnection = dataSource::getConnection)
 

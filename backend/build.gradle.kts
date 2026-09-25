@@ -20,7 +20,6 @@ dependencies {
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
     // JSON for HTTP bodies.
     implementation("com.alibaba.fastjson2:fastjson2:2.0.65")
-    implementation("org.xerial:sqlite-jdbc:3.53.4.0")
     // PostgreSQL JDBC driver; db/Database.kt also validates DB_URL with its URL parser.
     implementation("org.postgresql:postgresql:42.7.13")
     // Connection pool behind the PostgreSQL JdbcTemplate built in db/Database.kt.
@@ -48,7 +47,8 @@ kotlin {
     jvmToolchain(jdkVersion)
 }
 
-// sqlite-jdbc loads a native library; JDK 24+ warns (and will eventually refuse) without this flag.
+// Ktor's CallLogging colors its lines with jansi, which loads a native library on the first logged call;
+// JDK 24+ warns (and will eventually refuse) without this flag.
 val nativeAccess = "--enable-native-access=ALL-UNNAMED"
 
 application {

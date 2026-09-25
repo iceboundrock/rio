@@ -1,15 +1,13 @@
 package ai.project.rio.cardtransaction
 
-import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
+import ai.project.rio.db.PostgresTestDatabase
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.http.IdempotencyConflictException
 import ai.project.rio.http.NotFoundException
 import ai.project.rio.http.ValidationException
 import ai.project.rio.money.Currency
 import ai.project.rio.money.Money
-import java.nio.file.Files
-import java.nio.file.Path
 import java.sql.SQLException
 import java.time.Clock
 import java.time.Instant
@@ -27,30 +25,30 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Service-focused integration tests: the concrete repository against a temporary SQLite file,
+ * Service-focused integration tests: the concrete repository against an empty PostgreSQL database,
  * with a fixed clock so business rules (normalization, defaults, timestamps) are observable.
  */
 class CardTransactionServiceTest {
 
     private val fixedInstant = Instant.parse("2026-09-13T12:34:56.789Z")
 
-    private lateinit var dbFile: Path
+    private lateinit var db: PostgresTestDatabase
     private lateinit var jdbc: JdbcTemplate
     private lateinit var repository: CardTransactionRepository
     private lateinit var service: CardTransactionService
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("card-transaction-service-test", ".db")
-        jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc, dbFile)
+        db = PostgresTestDatabase.create()
+        jdbc = db.open()
+        SchemaInitializer.initialize(jdbc, db.address)
         repository = CardTransactionRepository(jdbc)
         service = CardTransactionService(jdbc, Clock.fixed(fixedInstant, ZoneOffset.UTC))
     }
 
     @AfterTest
     fun tearDown() {
-        Files.deleteIfExists(dbFile)
+        db.close()
     }
 
     @Test
@@ -225,19 +223,35 @@ class CardTransactionServiceTest {
     }
 
     @Test
+    fun `a description containing U+0000 is rejected without consuming the key`() {
+        // PostgreSQL text cannot store the character, so without this check the insert would fail with a 500.
+        val nul = assertFailsWith<ValidationException> { service.create("key-1", lunch.copy(description = "a\u0000b")) }
+        assertEquals("description must not contain U+0000", nul.message)
+        val inBatch = assertFailsWith<ValidationException> {
+            service.createAll("key-1", listOf(lunch, salary.copy(description = "\u0000")))
+        }
+        assertEquals("[1]: description must not contain U+0000", inBatch.message)
+
+        assertNull(idempotency.find("key-1"))
+        assertEquals(emptyList(), repository.findAll())
+        assertEquals(listOf(service.create("key-1", lunch)), repository.findAll())
+    }
+
+    @Test
     fun `a rolled back batch leaves no idempotency record`() {
         // A real mid-transaction failure: the second insert aborts, so the claim and the first insert
-        // must roll back with it. SchemaInitializer's drift guard only compares tables, not triggers.
+        // must roll back with it. SchemaInitializer's drift guard does not compare triggers.
         jdbc.execute(
-            "CREATE TRIGGER boom BEFORE INSERT ON card_transactions WHEN NEW.description = 'boom' " +
-                "BEGIN SELECT RAISE(ABORT, 'boom'); END",
+            "CREATE FUNCTION boom() RETURNS trigger LANGUAGE plpgsql AS " +
+                "'BEGIN IF NEW.description = ''boom'' THEN RAISE EXCEPTION ''boom''; END IF; RETURN NEW; END'",
         )
+        jdbc.execute("CREATE TRIGGER boom BEFORE INSERT ON card_transactions FOR EACH ROW EXECUTE FUNCTION boom()")
         assertFailsWith<SQLException> { service.createAll("key-1", listOf(lunch, lunch.copy(description = "boom"))) }
 
         assertNull(idempotency.find("key-1"))
         assertEquals(emptyList(), repository.findAll())
 
-        jdbc.execute("DROP TRIGGER boom")
+        jdbc.execute("DROP TRIGGER boom ON card_transactions")
         assertEquals(2, service.createAll("key-1", listOf(lunch, salary)).size)
     }
 
@@ -245,8 +259,8 @@ class CardTransactionServiceTest {
     fun `replay survives reopening the database`() {
         val first = service.createAll("key-1", listOf(lunch, salary))
 
-        val reopened = Database.open(dbFile)
-        SchemaInitializer.initialize(reopened, dbFile)
+        val reopened = db.open()
+        SchemaInitializer.initialize(reopened, db.address)
         val replay = CardTransactionService(reopened, Clock.fixed(fixedInstant.plusSeconds(60), ZoneOffset.UTC)).createAll("key-1", listOf(lunch, salary))
 
         assertEquals(first, replay)
