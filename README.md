@@ -1,6 +1,6 @@
 # Rio Starter: card transactions
 
-A deliberately small full-stack app: Kotlin, Ktor, plain JDBC and SQLite on the back, React,
+A deliberately small full-stack app: Kotlin, Ktor, plain JDBC and PostgreSQL on the back, React,
 TypeScript and Vite on the front, and shared JSON Schema contracts in between.
 It exists to be understood in five minutes and extended in twenty. Read `AGENTS.md` before changing anything.
 
@@ -10,27 +10,69 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash). Running the app needs no Docker and no external database; the backend tests need Docker (see [Tests and verification](#tests-and-verification)).
+Prerequisites: Docker (a running daemon: the backend's database runs in a container, and so do the backend tests, see [Tests and verification](#tests-and-verification)), JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash).
 
 ```bash
-./start.sh               # both at once; Ctrl+C stops both
-./stop.sh                # stop both servers from another terminal
+./start.sh               # PostgreSQL, backend and frontend at once; Ctrl+C stops all three
+./stop.sh                # the same shutdown, from another terminal
 ```
 
-Or separately:
+`./start.sh` runs PostgreSQL 17 as the container `rio-postgres` on `127.0.0.1:5432` (user, password
+and database all `rio`), waits until it accepts connections, then starts the backend and the frontend.
+The container is started with `--rm` and keeps its data in the named volume `rio-postgres-data`, so
+stopping removes the container but not the rows: the next start has the same card transactions. If
+`rio-postgres` is already running, `./start.sh` uses it and leaves it running on exit. On its first
+start the backend creates the tables and seeds 9 card transactions.
+
+The database is ready for change data capture (#115): the server runs with `wal_level=logical`, and on
+an empty volume the container runs `docker/postgres-rio/init.sql`, which creates the replication role
+`rio_cdc` (password `rio_cdc`, local use only), gives it read access to the tables, and creates the
+publication `rio_publication` for every table in schema `public`. A volume created before that file
+existed has no `rio_cdc`; [reset it](#reset-the-database).
+
+If port 5432 is already taken, `docker run` fails and `./start.sh` exits with Docker's message. There is
+no port option; to use another PostgreSQL server, run the backend separately with `DB_URL` (see
+[Configuration](#configuration)).
+
+Or separately, from the repository root:
 
 ```bash
-# Terminal 1 — backend on http://localhost:8080
-cd backend
-./gradlew run            # creates backend/data/rio.db, seeds 9 card transactions on first start
+# Terminal 1 — PostgreSQL on 127.0.0.1:5432; Ctrl+C stops it, the volume keeps the data
+docker run --rm --name rio-postgres \
+  -p 127.0.0.1:5432:5432 \
+  -v rio-postgres-data:/var/lib/postgresql/data \
+  -v "$PWD/docker/postgres-rio/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
+  -e POSTGRES_USER=rio -e POSTGRES_PASSWORD=rio -e POSTGRES_DB=rio \
+  postgres:17 -c wal_level=logical
 
-# Terminal 2 — frontend on http://localhost:5173 (proxies /api to :8080)
+# Terminal 2 — backend on http://localhost:8080, once terminal 1 logs
+# "database system is ready to accept connections" (on an empty volume: the one after "PostgreSQL init process complete")
+cd backend
+./gradlew run            # no variables needed: DB_URL, DB_USER and DB_PASSWORD default to this container
+
+# Terminal 3 — frontend on http://localhost:5173 (proxies /api to :8080)
 cd frontend
 pnpm install
 pnpm run dev
 ```
 
 Open http://localhost:5173, which redirects to `/card-transactions`.
+
+### Reset the database
+
+Reset after a schema change (there are no migrations: the backend refuses to start on tables that
+differ from the current definition, and its message gives these steps), or to give a volume from before
+`init.sql` the CDC setup. It deletes every card transaction. Stop Rio (`./stop.sh`, or Ctrl+C in each
+terminal), then:
+
+```bash
+docker rm -f rio-postgres && docker volume rm rio-postgres-data
+./start.sh               # or the three terminals above
+```
+
+`docker rm -f` removes a container that is still running, such as one `./start.sh` found running and
+left alone, and does nothing if there is none. On the next start the image initializes the empty volume
+and runs `init.sql` again, and the backend creates the tables and seeds the 9 card transactions.
 
 ## Tests and verification
 
@@ -100,6 +142,7 @@ frontend/src/
   pages/               CardTransactionListPage, CardTransactionDetailsPage, latestRequest (keeps only the newest in-flight response)
   components/          CardTransactionList, CardTransactionRow, CreateCardTransactionsForm (one or more rows, all-or-nothing)
 features/              one Markdown spec per interview work item
+docker/postgres-rio/   init.sql: the CDC role, grants and publication, run by the local PostgreSQL container on an empty volume
 ```
 
 ## API
@@ -231,16 +274,17 @@ Media-type matching is case-insensitive and accepts parameters such as `charset=
 structured suffix types such as `application/vnd.api+json` are not registered and return 415.
 
 Supported currencies are BRL, CAD, CNY, EUR, JPY and USD across the API, database, and UI.
-If an existing local database predates this currency set or the idempotency tables, stop the backend and delete the database
-file before restarting: `RIO_DB_PATH` if set, otherwise `data/rio.db` relative to the directory the
-backend was started from (`backend/data/rio.db` with the commands above). This resets local
-card transactions to the deterministic seed data. Schema changes use this reset workflow, not migrations.
-Startup creates the tables only for a fresh file. For an existing file it requires every table to be
-present and checks the stored DDL against the current definition, and it stops with reset instructions
-before serving requests (and before running any DDL) if a table is missing or differs, so a database
-from before a schema change is never quietly extended. The check normalizes SQLite's `CREATE TABLE` prefix and
-trailing whitespace/semicolon, but compares the column/constraint body exactly. This is not SQL
-semantic equivalence: manually reformatted bodies or modified definitions also require a reset.
+A local database from before a schema change (a new currency, a new table, a changed column) cannot be
+used as is; [reset it](#reset-the-database). Startup creates the tables only for a fresh database (none
+of Rio's table names in use). Otherwise it requires every table to be present and to match the current
+definition, and it stops with reset instructions before serving requests (and before running any DDL)
+if a table is missing or differs, so a database from before a schema change is never quietly extended.
+Both sides of the comparison are described by PostgreSQL: the expected tables are created from the DDL
+in a scratch schema inside a transaction that is rolled back, so formatting cannot cause a false
+mismatch. The check compares relation kind, columns in order with type, `NOT NULL` and default, and
+constraint definitions. Indexes that back no constraint, triggers, grants, replica identity,
+publication membership and constraint names are not compared, so the CDC setup in `init.sql` does not
+affect it.
 
 ## How a request flows
 
@@ -263,7 +307,7 @@ JdbcExecutor            db/JdbcExecutor.kt   (query, queryOne, update, ...: prep
                         transaction-bound executor that `transactional { tx -> }` hands to the block (one connection
                         for the whole block). The repository cannot tell which one it was given.
   ↓
-SQLite                  backend/data/rio.db
+PostgreSQL              database rio in the rio-postgres container (DB_URL)
 ```
 
 Application errors with JSON bodies flow back through `http/ErrorHandling.kt` as the shared
@@ -286,8 +330,8 @@ Application errors with JSON bodies flow back through `http/ErrorHandling.kt` as
       Repository                  API mapper
           │
           ▼
-      SQLite
- amount_minor INTEGER
+      PostgreSQL
+ amount_minor BIGINT
  currency TEXT
 ```
 
@@ -304,7 +348,7 @@ Application errors with JSON bodies flow back through `http/ErrorHandling.kt` as
 
 | Choice | Why |
 |---|---|
-| SQLite file, no external DB | Zero setup; tests use temp files; restarts keep data. |
+| PostgreSQL in a local container that `./start.sh` manages | One command still starts everything, restarts keep data, and PostgreSQL has the logical replication the CDC pipeline (#115) reads from. Tests get an empty database per test method from Testcontainers. |
 | `Money` value type, not `Long amount` + `String currency` | Currency can't be dropped or mixed by accident. |
 | Integer minor units, never floating point | Exactness. `0.1 + 0.2` is not a thing here. |
 | JSON amounts as integer *strings* | JS `number` can't hold all 64-bit values; strings can. |
@@ -327,7 +371,12 @@ spending limits, fees, FX, auth, migrations, concurrency control beyond the `Ide
 
 ## Configuration
 
-| Variable       | Default          | Meaning                      |
-|----------------|------------------|------------------------------|
-| `RIO_DB_PATH` | `data/rio.db`   | SQLite file; the default is relative to the directory the backend is started from (`backend/` with the commands above) |
-| `PORT`         | `8080`           | Backend HTTP port            |
+| Variable      | Default                                | Meaning                      |
+|---------------|----------------------------------------|------------------------------|
+| `DB_URL`      | `jdbc:postgresql://localhost:5432/rio` | JDBC URL of the database; must start with `jdbc:postgresql:` and carry no credentials; never printed |
+| `DB_USER`     | `rio`                                  | Role the backend connects as |
+| `DB_PASSWORD` | `rio`                                  | Its password; never logged or printed |
+| `PORT`        | `8080`                                 | Backend HTTP port            |
+
+The defaults match the `rio-postgres` container, so running Rio locally needs none of them. The role
+needs `CREATE` on the database: the startup schema check uses a temporary scratch schema.

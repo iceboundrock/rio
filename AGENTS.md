@@ -27,6 +27,7 @@ deprecation periods. Document breaking changes in the PR description and move on
 | `frontend/` | React / TypeScript single-page app; talks to the backend only over HTTP | `frontend/AGENTS.md` |
 | `contracts/schemas/` | JSON Schema for application JSON request and response bodies | `contracts/AGENTS.md` |
 | `features/` | One Markdown spec per work item; agree on it before implementing | `features/README.md` |
+| `docker/` | Files mounted into local containers; `postgres-rio/init.sql` sets up CDC (role, grants, publication) on Rio's PostgreSQL. No table DDL: `db/SchemaInitializer.kt` owns it | this file |
 
 ## File placement
 

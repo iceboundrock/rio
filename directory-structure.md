@@ -36,6 +36,7 @@ for future code.
 | `contracts/schemas/` | Shared JSON request and response body schemas |
 | `features/` | Work-item specifications |
 | `docs/` | Durable repository conventions and workflow guides |
+| `docker/` | Files mounted into local containers, one directory per database or service; `postgres-rio/` holds `init.sql` for Rio's PostgreSQL |
 | `README.md` | Setup and current application/API behavior |
 | `verify.sh` | Repository verification run by CI |
 
