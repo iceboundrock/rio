@@ -70,6 +70,24 @@ class CardTransactionRepositoryTest {
         assertEquals(Instant.parse("2026-01-02T03:04:05.123Z"), found.createdAt)
     }
 
+    /** PostgreSQL's `integer` is 32-bit, so an `amount_minor` declared that way would fail the first of these. */
+    @Test
+    fun `amounts beyond 32 bits round-trip exactly`() {
+        for (minor in listOf(Int.MAX_VALUE.toLong() + 1, Long.MAX_VALUE)) {
+            val large = lunch.copy(id = "tx-$minor", amount = Money(minor, Currency.JPY))
+            repository.insert(large)
+            assertEquals(large, repository.findById(large.id))
+        }
+    }
+
+    @Test
+    fun `createdAt with nanoseconds reads back cut to microseconds, not rounded`() {
+        // timestamptz keeps microseconds and rounds the rest, which would turn this into …:01Z.
+        repository.insert(lunch.copy(createdAt = Instant.parse("2026-09-10T18:00:00.9999996Z")))
+
+        assertEquals(Instant.parse("2026-09-10T18:00:00.999999Z"), repository.findById(lunch.id)!!.createdAt)
+    }
+
     @Test
     fun `findAll lists newest first`() {
         repository.insert(lunch)

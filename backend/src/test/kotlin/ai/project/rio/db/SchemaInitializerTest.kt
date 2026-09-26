@@ -112,6 +112,27 @@ class SchemaInitializerTest {
         assertEquals(columnsBefore, columns("card_transactions"))
     }
 
+    /** Seeds a matching database, changes one column's type, and asserts the next start refuses without touching the table. */
+    private fun assertRetypedColumnRefused(column: String, type: String) {
+        initialize()
+        SchemaInitializer.seedIfEmpty(jdbc)
+        jdbc.execute("ALTER TABLE card_transactions ALTER COLUMN $column TYPE $type")
+        val idsBefore = ids()
+
+        assertRefused("card_transactions", "does not match")
+
+        assertEquals(idsBefore, ids())
+        assertContains(columns("card_transactions"), "$column $type")
+    }
+
+    /** PostgreSQL's `integer` is 32-bit: the seed rows fit, and amounts above 2,147,483,647 would fail. */
+    @Test
+    fun `amount_minor as integer fails at startup and the table keeps its rows`() = assertRetypedColumnRefused("amount_minor", "integer")
+
+    /** `timestamptz` is what makes the list order by time; a text column orders by characters, as SQLite's did. */
+    @Test
+    fun `created_at as text fails at startup and the table keeps its rows`() = assertRetypedColumnRefused("created_at", "text")
+
     @Test
     fun `drift in an idempotency table fails at startup and names the table`() {
         initialize()
