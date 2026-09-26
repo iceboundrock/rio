@@ -170,7 +170,7 @@ operation, not a payload: it exists so a client that never saw the `201` can ret
   deduplication, not duplicate-transaction detection.
 - A request rejected before the transaction (media types, malformed JSON, invalid fields, blank
   descriptions, non-positive amounts, an invalid batch item) leaves the key unused. The key is claimed
-  inside the same SQLite transaction as the rows and the ordered id mapping, so a rollback releases it and
+  inside the same database transaction as the rows and the ordered id mapping, so a rollback releases it and
   a commit consumes it even if the response is lost. Keys never expire.
 - Under concurrency the primary key on the stored key decides ownership. Parallel requests with the same
   key produce one set of rows; the others wait for the writer and replay it, or get 422 if their payload

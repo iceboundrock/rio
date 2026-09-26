@@ -26,9 +26,11 @@ tests.
 ### One database (T1)
 
 - After #95: `git grep -n -i sqlite -- ':!features/' ':!README.md'` → no match; after #96, the same
-  without the README exclusion. `features/` keeps its history. `org.xerial:sqlite-jdbc` and the
-  `--enable-native-access=ALL-UNNAMED` flag, which exists only for sqlite-jdbc, are gone from
-  `backend/build.gradle.kts`.
+  without the README exclusion. `features/` keeps its history. `org.xerial:sqlite-jdbc` is gone from
+  `backend/build.gradle.kts`. The `--enable-native-access=ALL-UNNAMED` flag stays, although this
+  spec first assumed it existed only for sqlite-jdbc: jansi, which `ktor-server-call-logging` uses to
+  colour log lines, loads a native library on the first logged request, which JDK 24+ warns about and
+  a later JDK will refuse. The flag's comment names jansi (#118).
 - `cd backend && ./gradlew dependencies --configuration runtimeClasspath` → lists
   `org.postgresql:postgresql` and `com.zaxxer:HikariCP`, both pinned (#94).
 - The pool keeps HikariCP's defaults (10 connections), and connections keep PostgreSQL's default
