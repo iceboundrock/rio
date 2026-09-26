@@ -71,8 +71,9 @@ docker rm -f rio-postgres && docker volume rm rio-postgres-data
 ```
 
 `docker rm -f` removes a container that is still running, such as one `./start.sh` found running and
-left alone, and does nothing if there is none. On the next start the image initializes the empty volume
-and runs `init.sql` again, and the backend creates the tables and seeds the 9 card transactions.
+left alone. If `--rm` already removed it, `docker rm -f` still exits 0 (Docker 20.10 and later), so
+`docker volume rm` runs. On the next start the image initializes the empty volume and runs `init.sql`
+again, and the backend creates the tables and seeds the 9 card transactions.
 
 ## Tests and verification
 
