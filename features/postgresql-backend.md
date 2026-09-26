@@ -232,8 +232,10 @@ Checks (#97):
   byte-identical HTTP bodies with `createdAt` `2026-09-10T18:00:00.123456Z`.
 - Repository writes `…:00.9999996Z` → reads back `…:00.999999Z`.
 - Two rows at `…:00Z` and `…:00.123Z` → the `.123` row is listed first; two rows at `…:00.500Z` and
-  `…:00.500001Z` → the `.500001` row first. Both pairs are ones the TEXT column mis-sorted, so the
-  check fails against any text ordering, such as `created_at::text`.
+  `…:00.500001Z` → the `.500001` row first. Both pairs are ones the TEXT column of `Instant.toString()`
+  mis-sorted, so the check fails against that ordering. Against `ORDER BY created_at::text` it
+  depends on the session time zone: in UTC, as on CI, PostgreSQL renders `… 18:00:00+00` and
+  `… 18:00:00.5+00`, which sort both pairs by time, and the check passes (found in #97).
 
 ### Idempotency under concurrency
 

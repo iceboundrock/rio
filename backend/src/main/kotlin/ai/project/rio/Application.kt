@@ -16,6 +16,7 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
+import java.time.Clock
 
 /**
  * Entry point. Wiring is done by hand right here; there is no DI container.
@@ -41,8 +42,8 @@ fun main() {
     }.start(wait = true)
 }
 
-/** Ktor module. Tests call this directly with an empty test database. */
-fun Application.module(jdbc: JdbcTemplate) {
+/** Ktor module. Tests call this directly with an empty test database, and pass a fixed [clock] to pin `createdAt`. */
+fun Application.module(jdbc: JdbcTemplate, clock: Clock = Clock.systemUTC()) {
     install(ContentNegotiation) {
         fastjson2()
         // Negotiate the success response from the same reading of Accept that admitted the request
@@ -52,7 +53,7 @@ fun Application.module(jdbc: JdbcTemplate) {
     install(CallLogging)
     configureErrorHandling()
 
-    val cardTransactionService = CardTransactionService(jdbc)
+    val cardTransactionService = CardTransactionService(jdbc, clock)
 
     routing {
         cardTransactionRoutes(cardTransactionService)

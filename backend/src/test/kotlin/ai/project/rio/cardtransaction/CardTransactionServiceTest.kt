@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -143,6 +144,36 @@ class CardTransactionServiceTest {
             service.create("key-2", NewCardTransaction("Lunch", Money(0, Currency.USD), CardTransactionType.DEBIT))
         }
         assertEquals("amount must be positive", zero.message)
+    }
+
+    // ---- Timestamps ----
+
+    private fun serviceAt(instant: String) = CardTransactionService(jdbc, Clock.fixed(Instant.parse(instant), ZoneOffset.UTC))
+
+    @Test
+    fun `a nanosecond clock is stamped at microseconds, so create and its replay are equal`() {
+        val nanoseconds = serviceAt("2026-09-10T18:00:00.123456789Z")
+
+        val created = nanoseconds.create("key-1", lunch)
+
+        // The replay is read back from timestamptz, which holds microseconds.
+        assertEquals(created, nanoseconds.create("key-1", lunch))
+        assertEquals(Instant.parse("2026-09-10T18:00:00.123456Z"), created.createdAt)
+        assertEquals(created, repository.findById(created.id))
+    }
+
+    /**
+     * Both pairs are ones the TEXT column of `Instant.toString()` listed the wrong way round: within
+     * one second the shorter rendering is a prefix of the longer, and `Z` sorts after `.` and every digit.
+     */
+    @Test
+    fun `list orders same-second rows by time, not by their ISO-8601 text`() {
+        val oldestFirst = listOf(
+            "2026-09-10T18:00:00Z", "2026-09-10T18:00:00.123Z",
+            "2026-09-10T19:00:00.500Z", "2026-09-10T19:00:00.500001Z",
+        ).mapIndexed { i, instant -> serviceAt(instant).create("key-$i", lunch) }
+
+        assertEquals(oldestFirst.reversed(), service.list())
     }
 
     // ---- Idempotency-Key ----
@@ -280,8 +311,19 @@ class CardTransactionServiceTest {
         }
     }
 
+    /**
+     * Makes every card transaction insert sleep, so racing transactions overlap. A new pool starts with
+     * one connection and opens the rest in the background; without this, the callers can take turns on
+     * that one connection and nothing races.
+     */
+    private fun slowCardTransactionInserts(seconds: Double) {
+        jdbc.execute("CREATE FUNCTION slow_insert() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN PERFORM pg_sleep($seconds); RETURN NEW; END'")
+        jdbc.execute("CREATE TRIGGER slow_insert BEFORE INSERT ON card_transactions FOR EACH ROW EXECUTE FUNCTION slow_insert()")
+    }
+
     @Test
     fun `parallel same key and payload create once`() {
+        slowCardTransactionInserts(0.5)
         val outcomes = inParallel(8) { service.create("key-1", lunch) }
 
         val results = outcomes.map { it.getOrThrow() }
@@ -292,6 +334,7 @@ class CardTransactionServiceTest {
 
     @Test
     fun `parallel same key and different payloads keep only the winner`() {
+        slowCardTransactionInserts(0.25)
         val outcomes = inParallel(8) { i -> service.createAll("key-1", listOf(lunch.copy(description = "item-$i"), salary)) }
 
         val winners = outcomes.filter { it.isSuccess }.map { it.getOrThrow() }
@@ -301,5 +344,43 @@ class CardTransactionServiceTest {
         assertTrue(losers.all { it is IdempotencyConflictException }, losers.toString())
         assertEquals(winners.single().sortedByDescending { it.id }, repository.findAll())
         assertEquals(winners.single().map { it.id }, idempotency.findCardTransactionIds("key-1"))
+    }
+
+    /** More callers than the pool's 10 connections, so some wait for a connection as well as for the key. */
+    private val manyCallers = 32
+
+    @Test
+    fun `many callers racing one key insert once, and each other caller replays or conflicts by its payload`() {
+        // The winner holds its uncommitted claim while it sleeps, so the callers that get a connection
+        // meanwhile wait on the key; the rest find it committed.
+        slowCardTransactionInserts(0.5)
+        val payloads = listOf(lunch, lunch.copy(description = "Dinner"))
+
+        val outcomes = inParallel(manyCallers) { i -> service.create("key-1", payloads[i % 2]) }
+
+        val rows = repository.findAll()
+        assertEquals(1, rows.size, "exactly one insert: $rows")
+        val winner = rows.single()
+        val winningPayload = payloads.indexOfFirst { it.description == winner.description }
+        outcomes.forEachIndexed { i, outcome ->
+            if (i % 2 == winningPayload) {
+                assertEquals(winner, outcome.getOrThrow(), "caller $i sent the winning payload")
+            } else {
+                assertIs<IdempotencyConflictException>(outcome.exceptionOrNull(), "caller $i sent the other payload: $outcome")
+            }
+        }
+        assertEquals(listOf(winner.id), idempotency.findCardTransactionIds("key-1"))
+    }
+
+    @Test
+    fun `many callers with distinct keys all create`() {
+        slowCardTransactionInserts(0.05)
+        val outcomes = inParallel(manyCallers) { i -> service.createAll("key-$i", listOf(lunch, salary)) }
+
+        // A serialization failure, a deadlock or a pool timeout would be a SQLException here, which the API answers as a 500.
+        val created = outcomes.map { it.getOrThrow() }
+        assertEquals(created.flatten().toSet(), repository.findAll().toSet())
+        assertEquals(2 * manyCallers, repository.findAll().size)
+        created.forEachIndexed { i, items -> assertEquals(items.map { it.id }, idempotency.findCardTransactionIds("key-$i")) }
     }
 }

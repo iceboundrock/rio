@@ -40,6 +40,9 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.net.Socket
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -70,8 +73,8 @@ class CardTransactionRoutesTest {
         db.close()
     }
 
-    private fun withApp(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
-        application { module(jdbc) }
+    private fun withApp(clock: Clock = Clock.systemUTC(), block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
+        application { module(jdbc, clock) }
         block()
     }
 
@@ -1129,5 +1132,42 @@ class CardTransactionRoutesTest {
 
         assertEquals(HttpStatusCode.Created, created.status, created.bodyAsText())
         assertEquals(created.bodyAsText(), postJson(validRequest, key).bodyAsText())
+    }
+
+    // ---- createdAt on timestamptz ----
+
+    @Test
+    fun `a nanosecond clock answers a microsecond createdAt, byte-identical on replay and GET`() =
+        withApp(Clock.fixed(Instant.parse("2026-09-10T18:00:00.123456789Z"), ZoneOffset.UTC)) {
+            val key = UUID.randomUUID().toString()
+            val created = postJson(validRequest, key)
+            assertEquals(HttpStatusCode.Created, created.status)
+            val body = created.bodyAsText()
+            assertMatchesSchema(body, "card-transaction.schema.json")
+            val json = JSON.parseObject(body)
+            assertEquals("2026-09-10T18:00:00.123456Z", json.getString("createdAt"))
+
+            assertEquals(body, postJson(validRequest, key).bodyAsText())
+            assertEquals(body, client.get("/api/card-transactions/${json.getString("id")}").bodyAsText())
+        }
+
+    @Test
+    fun `the list shows same-second rows in time order`() = withApp {
+        // Newer than every seed row, so they head the list. Each pair is one the TEXT column of
+        // Instant.toString() listed the wrong way round (see CardTransactionServiceTest).
+        val oldestFirst = listOf(
+            "2026-09-10T18:00:00Z", "2026-09-10T18:00:00.123Z",
+            "2026-09-10T19:00:00.500Z", "2026-09-10T19:00:00.500001Z",
+        )
+        val repository = CardTransactionRepository(jdbc)
+        oldestFirst.forEachIndexed { i, createdAt ->
+            repository.insert(SchemaInitializer.SEED.first().copy(id = "same-second-$i", createdAt = Instant.parse(createdAt)))
+        }
+
+        val body = client.get("/api/card-transactions").bodyAsText()
+
+        assertMatchesSchema(body, "card-transaction-list-response.schema.json")
+        val items = JSON.parseObject(body).getJSONArray("items")
+        assertEquals(oldestFirst.reversed(), oldestFirst.indices.map { items.getJSONObject(it).getString("createdAt") })
     }
 }
