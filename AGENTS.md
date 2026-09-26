@@ -23,7 +23,7 @@ deprecation periods. Document breaking changes in the PR description and move on
 
 | Path | What lives there | Rules |
 |---|---|---|
-| `backend/` | Kotlin / Ktor HTTP API over SQLite through plain JDBC | `backend/AGENTS.md` |
+| `backend/` | Kotlin / Ktor HTTP API over PostgreSQL through plain JDBC | `backend/AGENTS.md` |
 | `frontend/` | React / TypeScript single-page app; talks to the backend only over HTTP | `frontend/AGENTS.md` |
 | `contracts/schemas/` | JSON Schema for application JSON request and response bodies | `contracts/AGENTS.md` |
 | `features/` | One Markdown spec per work item; agree on it before implementing | `features/README.md` |

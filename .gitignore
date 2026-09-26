@@ -1,10 +1,7 @@
 # Backend
 backend/.gradle/
 backend/build/
-backend/data/
 backend/.kotlin/
-*.db
-*.db-journal
 
 # Frontend
 frontend/node_modules/

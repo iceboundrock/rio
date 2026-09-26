@@ -1,12 +1,10 @@
 package ai.project.rio.cardtransaction
 
-import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
+import ai.project.rio.db.PostgresTestDatabase
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.money.Currency
 import ai.project.rio.money.Money
-import java.nio.file.Files
-import java.nio.file.Path
 import java.sql.SQLException
 import java.time.Instant
 import kotlin.test.AfterTest
@@ -20,7 +18,7 @@ import kotlin.test.assertTrue
 
 class CardTransactionIdempotencyRepositoryTest {
 
-    private lateinit var dbFile: Path
+    private lateinit var db: PostgresTestDatabase
     private lateinit var jdbc: JdbcTemplate
     private lateinit var repository: CardTransactionIdempotencyRepository
 
@@ -28,15 +26,15 @@ class CardTransactionIdempotencyRepositoryTest {
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("card-transaction-idempotency-repository-test", ".db")
-        jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc, dbFile)
+        db = PostgresTestDatabase.create()
+        jdbc = db.open()
+        SchemaInitializer.initialize(jdbc, db.address)
         repository = CardTransactionIdempotencyRepository(jdbc)
     }
 
     @AfterTest
     fun tearDown() {
-        Files.deleteIfExists(dbFile)
+        db.close()
     }
 
     private fun cardTransaction(id: String) = CardTransaction(

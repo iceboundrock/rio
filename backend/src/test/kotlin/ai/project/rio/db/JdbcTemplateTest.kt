@@ -1,7 +1,8 @@
 package ai.project.rio.db
 
-import java.nio.file.Files
-import java.nio.file.Path
+import java.sql.Connection
+import java.time.Instant
+import java.time.OffsetDateTime
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -13,19 +14,19 @@ import kotlin.test.assertTrue
 
 class JdbcTemplateTest {
 
-    private lateinit var dbFile: Path
+    private lateinit var db: PostgresTestDatabase
     private lateinit var jdbc: JdbcTemplate
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("jdbc-template-test", ".db")
-        jdbc = Database.open(dbFile)
-        jdbc.update("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER, big INTEGER, active INTEGER, note TEXT)")
+        db = PostgresTestDatabase.create()
+        jdbc = db.open()
+        jdbc.update("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER, big BIGINT, active BOOLEAN, note TEXT)")
     }
 
     @AfterTest
     fun tearDown() {
-        Files.deleteIfExists(dbFile)
+        db.close()
     }
 
     private fun insert(id: Int, name: String?, qty: Int = 0, big: Long = 0, active: Boolean = false, note: String? = null) =
@@ -70,9 +71,27 @@ class JdbcTemplateTest {
     @Test
     fun `unsupported parameter type fails clearly`() {
         val e = assertFailsWith<IllegalArgumentException> {
-            jdbc.update("INSERT INTO items (id) VALUES (?)", listOf(java.time.Instant.EPOCH))
+            jdbc.update("INSERT INTO items (id) VALUES (?)", listOf(java.math.BigDecimal.ONE))
         }
         assertTrue(e.message!!.contains("Unsupported JDBC parameter type"))
+    }
+
+    @Test
+    fun `binds Instant as timestamptz, cut to microseconds whatever the session time zone`() {
+        jdbc.execute("CREATE TABLE stamps (id INTEGER PRIMARY KEY, at TIMESTAMPTZ NOT NULL)")
+        // PostgreSQL itself would round this one up to the next second.
+        val written = Instant.parse("2026-09-10T18:00:00.9999996Z")
+        val read = jdbc.withTransaction { tx ->
+            tx.execute("SET LOCAL TIME ZONE 'Asia/Tokyo'")
+            tx.update("INSERT INTO stamps (id, at) VALUES (?, ?)", listOf(1, written))
+            tx.queryForObject("SELECT at FROM stamps WHERE id = ?", listOf(1)) { it.getObject("at", OffsetDateTime::class.java).toInstant() }
+        }
+        assertEquals(Instant.parse("2026-09-10T18:00:00.999999Z"), read)
+        assertEquals(
+            "2026-09-10 18:00:00.999999+00",
+            jdbc.queryForObject("SELECT at::text FROM stamps WHERE id = ?", listOf(1)) { it.getString(1) },
+            "stored as that instant, not as the Tokyo wall-clock time",
+        )
     }
 
     @Test
@@ -114,23 +133,43 @@ class JdbcTemplateTest {
     }
 
     @Test
+    fun `withRollback discards the block's writes even when it returns normally`() {
+        insert(1, "before")
+        val seenInside = jdbc.withRollback { tx ->
+            tx.update("INSERT INTO items (id, name) VALUES (?, ?)", listOf(2, "inside"))
+            tx.execute("CREATE TABLE scratch (id INTEGER)")
+            tx.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") }
+        }
+        assertEquals(2, seenInside)
+        assertEquals(listOf("before"), jdbc.query("SELECT name FROM items") { it.getString("name") })
+        assertNull(jdbc.queryOne("SELECT to_regclass('scratch') AS t") { it.getString("t") })
+    }
+
+    @Test
+    fun `withRollback rethrows a failure from the block`() {
+        val e = assertFailsWith<IllegalStateException> {
+            jdbc.withRollback { tx -> tx.update("INSERT INTO items (id) VALUES (?)", listOf(1)); error("boom") }
+        }
+        assertEquals("boom", e.message)
+        assertEquals(0, jdbc.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
+    }
+
+    @Test
     fun `statements outside a transaction auto-commit`() {
         insert(1, "a")
-        // A fresh connection (separate JdbcTemplate over the same file) sees the row.
-        assertEquals(1, Database.open(dbFile).queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
+        // A fresh connection (a second pool on the same database) sees the row.
+        assertEquals(1, db.open().queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
     }
 
     @Test
     fun `connections are closed after each call`() {
-        var opened = 0
-        val counting = JdbcTemplate {
-            opened++
-            java.sql.DriverManager.getConnection("jdbc:sqlite:${dbFile.toAbsolutePath()}")
-        }
+        val opened = mutableListOf<Connection>()
+        val counting = JdbcTemplate { db.connect().also(opened::add) }
         counting.query("SELECT 1") { it.getInt(1) }
         counting.withTransaction { tx -> tx.update("INSERT INTO items (id) VALUES (?)", listOf(5)); tx.update("INSERT INTO items (id) VALUES (?)", listOf(6)) }
-        assertEquals(2, opened, "one connection per call, one per transaction block")
-        // If a connection leaked with an open write, SQLite would hold a lock and this would time out.
+        counting.withRollback { tx -> tx.update("INSERT INTO items (id) VALUES (?)", listOf(7)) }
+        assertEquals(3, opened.size, "one connection per call, one per transaction block")
+        assertTrue(opened.all { it.isClosed }, "every connection is closed when its call returns")
         assertEquals(2, jdbc.queryOne("SELECT count(*) AS n FROM items") { it.getInt("n") })
     }
 
@@ -229,35 +268,16 @@ class JdbcTemplateTest {
     @Test
     fun `maxRows setting caps every query`() {
         insert(1, "a"); insert(2, "b"); insert(3, "c")
-        val capped = JdbcTemplate(StatementSettings(maxRows = 2)) {
-            java.sql.DriverManager.getConnection("jdbc:sqlite:${dbFile.toAbsolutePath()}")
-        }
+        val capped = JdbcTemplate(StatementSettings(maxRows = 2), db::connect)
         assertEquals(listOf("a", "b"), capped.query("SELECT name FROM items ORDER BY id") { it.getString("name") })
         assertEquals(2, capped.withTransaction { tx -> tx.query("SELECT name FROM items") { it.getString("name") }.size })
     }
 
     @Test
     fun `statement settings are applied to each prepared statement`() {
-        // sqlite-jdbc ignores fetchSize and does not echo it back, so record the setter calls instead.
-        val applied = mutableMapOf<String, Any?>()
-        val recording = JdbcTemplate(StatementSettings(queryTimeoutSeconds = 7, maxRows = 5, fetchSize = 3)) {
-            recordStatementSetters(java.sql.DriverManager.getConnection("jdbc:sqlite:${dbFile.toAbsolutePath()}"), applied)
-        }
-        recording.query("SELECT 1") { rs -> rs.getInt(1) }
-        assertEquals(mapOf<String, Any?>("setQueryTimeout" to 7, "setMaxRows" to 5, "setFetchSize" to 3), applied)
-    }
-
-    private fun recordStatementSetters(conn: java.sql.Connection, into: MutableMap<String, Any?>): java.sql.Connection {
-        val loader = conn.javaClass.classLoader
-        fun wrapStatement(stmt: java.sql.PreparedStatement): java.sql.PreparedStatement =
-            java.lang.reflect.Proxy.newProxyInstance(loader, arrayOf(java.sql.PreparedStatement::class.java)) { _, m, args ->
-                if (m.name in setOf("setQueryTimeout", "setMaxRows", "setFetchSize")) into[m.name] = args[0]
-                m.invoke(stmt, *(args ?: emptyArray()))
-            } as java.sql.PreparedStatement
-        return java.lang.reflect.Proxy.newProxyInstance(loader, arrayOf(java.sql.Connection::class.java)) { _, m, args ->
-            val result = m.invoke(conn, *(args ?: emptyArray()))
-            if (m.name == "prepareStatement") wrapStatement(result as java.sql.PreparedStatement) else result
-        } as java.sql.Connection
+        val configured = JdbcTemplate(StatementSettings(queryTimeoutSeconds = 7, maxRows = 5, fetchSize = 3), db::connect)
+        val seen = configured.extract("SELECT 1") { rs -> Triple(rs.statement.queryTimeout, rs.statement.maxRows, rs.statement.fetchSize) }
+        assertEquals(Triple(7, 5, 3), seen)
     }
 
     @Test

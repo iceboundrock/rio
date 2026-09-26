@@ -6,7 +6,13 @@
   "additionalProperties": false,
   "required": ["description", "amount", "type"],
   "properties": {
-    "description": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "description": {
+      "description": "Not blank, and free of U+0000, which PostgreSQL text cannot store. A schema object takes one pattern, so the second rule is a subschema.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S",
+      "not": { "pattern": "\\u0000" }
+    },
     "amount": { "$ref": "money.schema.json#/$defs/positive" },
     "type": { "type": "string", "enum": ["CREDIT", "DEBIT"] }
   }

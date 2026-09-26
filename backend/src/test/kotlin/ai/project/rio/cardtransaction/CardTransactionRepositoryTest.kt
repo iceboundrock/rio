@@ -1,12 +1,10 @@
 package ai.project.rio.cardtransaction
 
-import ai.project.rio.db.Database
 import ai.project.rio.db.JdbcTemplate
+import ai.project.rio.db.PostgresTestDatabase
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.money.Currency
 import ai.project.rio.money.Money
-import java.nio.file.Files
-import java.nio.file.Path
 import java.sql.SQLException
 import java.time.Instant
 import kotlin.test.AfterTest
@@ -18,21 +16,21 @@ import kotlin.test.assertNull
 
 class CardTransactionRepositoryTest {
 
-    private lateinit var dbFile: Path
+    private lateinit var db: PostgresTestDatabase
     private lateinit var jdbc: JdbcTemplate
     private lateinit var repository: CardTransactionRepository
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("card-transaction-repository-test", ".db")
-        jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc, dbFile)
+        db = PostgresTestDatabase.create()
+        jdbc = db.open()
+        SchemaInitializer.initialize(jdbc, db.address)
         repository = CardTransactionRepository(jdbc)
     }
 
     @AfterTest
     fun tearDown() {
-        Files.deleteIfExists(dbFile)
+        db.close()
     }
 
     private val lunch = CardTransaction(
@@ -86,7 +84,7 @@ class CardTransactionRepositoryTest {
     }
 
     @Test
-    fun `SQLite CHECK constraints back up application validation`() {
+    fun `CHECK constraints back up application validation`() {
         assertFailsWith<SQLException> { repository.insert(lunch.copy(amount = Money(0, Currency.USD))) }
         assertFailsWith<SQLException> { repository.insert(lunch.copy(amount = Money(-5, Currency.USD))) }
         assertFailsWith<SQLException> { repository.insert(lunch.copy(description = "   ")) }

@@ -122,6 +122,24 @@ class JsonSchemaAssertionsTest {
     }
 
     /**
+     * The request's U+0000 rule, `not: {pattern: "\\u0000"}`: joni must read the escape as U+0000, as Ajv
+     * does (frontend schemas.test.ts has the same cases), not as a literal `u0000` or backslash.
+     */
+    @Test
+    fun `the U+0000 rule rejects that character and nothing else`() {
+        for (description in listOf("\"a\\u0000b\"", "\"\\u0000\"", "\"Lunch\\u0000\"")) {
+            assertViolatesSchema(request("\"Lunch\"" to description), "create-card-transaction-request.schema.json")
+            assertViolatesSchema("[${request("\"Lunch\"" to description)}]", "create-card-transactions-request.schema.json")
+        }
+        for (description in listOf("\"u0000\"", "\"\\\\u0000\"", "\"\\u0001\"", "\"0\"")) {
+            assertMatchesSchema(request("\"Lunch\"" to description), "create-card-transaction-request.schema.json")
+        }
+        val nul = schema("\\u0000", JsonSchemaAssertions::registry)
+        assertMatchesPattern(nul, "a\u0000b")
+        for (text in listOf("u0000", "\\u0000", "\u0001", "0", "")) assertViolatesPattern(nul, text)
+    }
+
+    /**
      * The one known construct joni reads differently from ECMAScript: its `.` excludes only U+000A,
      * while `/./u` also excludes U+000D, U+2028 and U+2029. This pins the divergence as it stands so
      * the guard below is dropped, not forgotten, once the engine agrees with the browser.

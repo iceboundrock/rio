@@ -45,8 +45,8 @@ cd frontend && pnpm run preview       # serve the build under Content-Security-P
 Backend tests need a running Docker daemon. `PostgresTestDatabase` (in the backend's `db` test package)
 starts one `postgres:17` container per test run through Testcontainers, gives each test method its own
 empty database in it, and the container is removed when the run ends; no `DB_URL` or local container is
-involved, and the first run pulls the image. Without Docker, the tests that use it fail with Testcontainers'
-`Could not find a valid Docker environment`; the rest still run on temporary SQLite files.
+involved, and the first run pulls the image. Every test that touches a database uses it, so without Docker
+those fail with Testcontainers' `Could not find a valid Docker environment`.
 
 `pnpm test` and `pnpm run build` first regenerate `frontend/src/api/validators.generated.{js,d.ts}` from
 `contracts/schemas` (`pnpm run generate:validators`). The generated files are checked in; `./verify.sh`
@@ -63,9 +63,8 @@ the `jdkVersion` Gradle property) on a single Node version (Node only drives the
 toolchain; the React app never runs on it). That version is exactly 24.21.0, the floor of the
 `engines.node` range in `frontend/package.json`, so a newer-than-floor Node API sneaking into
 the build or test setup fails in CI; local development on a newer Node covers the other end.
-No secrets and no service containers: backend tests create temporary SQLite files, and the
-PostgreSQL tests start their own container through Testcontainers on the Docker daemon that
-GitHub's `ubuntu-latest` runners provide. Nothing is cached, so each job pulls `postgres:17`. When a run
+No secrets and no service containers: backend tests start their own PostgreSQL container through
+Testcontainers on the Docker daemon that GitHub's `ubuntu-latest` runners provide. Nothing is cached, so each job pulls `postgres:17`. When a run
 fails, the backend HTML and XML test reports are uploaded as a
 `backend-test-reports-jdk-<version>` artifact.
 
@@ -82,7 +81,7 @@ repositories and paid plans); once available, set it under
 contracts/schemas/     JSON Schema (Draft 2020-12). Source of truth for application JSON body shapes.
 backend/src/main/kotlin/ai/project/rio/
   Application.kt       wiring + main()
-  db/                  Database (SQLite connection setup), JdbcExecutor, JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL + seed)
+  db/                  Database (DB_URL checks, PostgreSQL pool), JdbcExecutor, JdbcTemplate, TransactionalService (service base), SchemaInitializer (DDL, drift guard, seed)
   money/               Currency, Money, Ratio, MoneyRounding
   cardtransaction/     CardTransaction (domain), Repository (SQL), Service (rules), Routes (HTTP), Dtos (wire),
                        IdempotencyRepository (Idempotency-Key SQL), RequestFingerprint (SHA-256 identity of a validated create)
@@ -171,7 +170,7 @@ operation, not a payload: it exists so a client that never saw the `201` can ret
   deduplication, not duplicate-transaction detection.
 - A request rejected before the transaction (media types, malformed JSON, invalid fields, blank
   descriptions, non-positive amounts, an invalid batch item) leaves the key unused. The key is claimed
-  inside the same SQLite transaction as the rows and the ordered id mapping, so a rollback releases it and
+  inside the same database transaction as the rows and the ordered id mapping, so a rollback releases it and
   a commit consumes it even if the response is lost. Keys never expire.
 - Under concurrency the primary key on the stored key decides ownership. Parallel requests with the same
   key produce one set of rows; the others wait for the writer and replay it, or get 422 if their payload
@@ -187,6 +186,8 @@ for a field (a number, boolean, object or array where the contract says string).
 A description is blank when every character is ECMAScript whitespace, the set the contract's
 `pattern: "\S"` means; that includes U+00A0 and U+FEFF and excludes U+001C..U+001F, unlike Kotlin's
 `isBlank`. The stored description is trimmed by the same set.
+A description containing U+0000 returns 400 `VALIDATION_ERROR` with `description must not contain U+0000`,
+because PostgreSQL text cannot store that character; the request schema refuses it too.
 Validation error *responses* describe constraints without echoing request values; server logs are
 not redacted and still record the full request line.
 A malformed `Accept` header returns 400 with `malformed Accept header` before the route runs.

@@ -2,7 +2,8 @@ package ai.project.rio.cardtransaction
 
 import ai.project.rio.contract.JsonSchemaAssertions.assertMatchesSchema
 import ai.project.rio.contract.JsonSchemaAssertions.assertViolatesSchema
-import ai.project.rio.db.Database
+import ai.project.rio.db.JdbcTemplate
+import ai.project.rio.db.PostgresTestDatabase
 import ai.project.rio.db.SchemaInitializer
 import ai.project.rio.http.IdempotencyConflictException
 import ai.project.rio.http.configureErrorHandling
@@ -39,8 +40,6 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import java.net.Socket
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -50,28 +49,29 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 
 /**
- * Exercises the real Ktor pipeline against a temporary SQLite file and validates every
+ * Exercises the real Ktor pipeline against an empty PostgreSQL database and validates every
  * response body against the shared JSON Schemas in contracts/schemas.
  */
 class CardTransactionRoutesTest {
 
-    private lateinit var dbFile: Path
+    private lateinit var db: PostgresTestDatabase
+    private lateinit var jdbc: JdbcTemplate
 
     @BeforeTest
     fun setUp() {
-        dbFile = Files.createTempFile("card-transaction-routes-test", ".db")
-        val jdbc = Database.open(dbFile)
-        SchemaInitializer.initialize(jdbc, dbFile)
+        db = PostgresTestDatabase.create()
+        jdbc = db.open()
+        SchemaInitializer.initialize(jdbc, db.address)
         SchemaInitializer.seedIfEmpty(jdbc)
     }
 
     @AfterTest
     fun tearDown() {
-        Files.deleteIfExists(dbFile)
+        db.close()
     }
 
     private fun withApp(block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
-        application { module(Database.open(dbFile)) }
+        application { module(jdbc) }
         block()
     }
 
@@ -91,7 +91,7 @@ class CardTransactionRoutesTest {
      * Raw sockets rather than the Ktor test client: the client parses Content-Type and Accept while
      * building the request and rejects malformed values before they ever reach the server.
      */
-    private fun withRawServer(app: Application.() -> Unit = { module(Database.open(dbFile)) }, block: suspend (Int) -> Unit) = runBlocking {
+    private fun withRawServer(app: Application.() -> Unit = { module(jdbc) }, block: suspend (Int) -> Unit) = runBlocking {
         val server = embeddedServer(Netty, host = "127.0.0.1", port = 0, module = app)
         try {
             server.start(wait = false)
@@ -154,7 +154,7 @@ class CardTransactionRoutesTest {
 
     @Test
     fun `raw Accept headers cannot bypass error serialization`() = withRawServer({
-        module(Database.open(dbFile))
+        module(jdbc)
         routing { get("/test-failure") { error("server-only-secret") } }
     }) { port ->
         val cases = listOf(
@@ -166,7 +166,7 @@ class CardTransactionRoutesTest {
             Triple("POST /api/card-transactions", "application/json", 201),
             Triple("GET /test-failure", null, 500),
         )
-        val repository = CardTransactionRepository(Database.open(dbFile))
+        val repository = CardTransactionRepository(jdbc)
         for (accept in listOf("**", "**secret-marker", "text/plain", "application/json")) {
             // Malformed and unacceptable Accept headers are both rejected before routing, so no target
             // reaches its handler: the status describes the header, not what the route would have done.
@@ -292,7 +292,7 @@ class CardTransactionRoutesTest {
             listOf("application/json;charset=\"open"),
             listOf("application/json;q = 0"),
         )
-        val repository = CardTransactionRepository(Database.open(dbFile))
+        val repository = CardTransactionRepository(jdbc)
         for (accept in acceptable + unacceptable + malformed) {
             val expectedError = when (accept) {
                 in unacceptable -> 406 to "no acceptable response media type"
@@ -379,7 +379,7 @@ class CardTransactionRoutesTest {
         // No ContentNegotiation: receive() fails, and the handler for that failure must not re-parse
         // the header unguarded - a throw inside StatusPages escapes as a plain-text engine 500.
         configureErrorHandling()
-        routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
+        routing { cardTransactionRoutes(CardTransactionService(jdbc)) }
     }) { port ->
         val malformed = rawRequest(port, "POST /api/card-transactions", listOf("Content-Type: not a mime type", idempotencyKeyLine()), validRequest)
         assertEquals(400, malformed.status, malformed.raw)
@@ -425,7 +425,7 @@ class CardTransactionRoutesTest {
     fun `missing ContentNegotiation is a server error with a JSON response`() = testApplication {
         application {
             configureErrorHandling()
-            routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
+            routing { cardTransactionRoutes(CardTransactionService(jdbc)) }
         }
         val response = postJson(validRequest)
         assertEquals(HttpStatusCode.InternalServerError, response.status)
@@ -447,7 +447,7 @@ class CardTransactionRoutesTest {
                 ignoreType<CreateCardTransactionsBody>()
             }
             configureErrorHandling()
-            routing { cardTransactionRoutes(CardTransactionService(Database.open(dbFile))) }
+            routing { cardTransactionRoutes(CardTransactionService(jdbc)) }
         }
         try {
             val response = postJson(validRequest)
@@ -660,6 +660,15 @@ class CardTransactionRoutesTest {
         val body = response.bodyAsText()
         assertMatchesSchema(body, "card-transaction.schema.json")
         assertEquals("\u001CLunch", JSON.parseObject(body).getString("description"))
+    }
+
+    /** PostgreSQL text cannot store U+0000, so the contract and the service refuse it before any INSERT could fail with a 500. */
+    @Test
+    fun `POST description containing U+0000 is 400 and writes nothing`() = withApp {
+        val before = listIds()
+        assertBadRequest(validRequest.replace("Lunch", "Lu\\u0000nch"), "description must not contain U+0000")
+        assertBadRequest(validRequest.replace("Lunch", "\\u0000"), "description must not contain U+0000")
+        assertEquals(before, listIds())
     }
 
     @Test
@@ -979,7 +988,7 @@ class CardTransactionRoutesTest {
      */
     @Test
     fun `raw blank, control-character and repeated Idempotency-Key headers are 400`() = withRawServer { port ->
-        val repository = CardTransactionRepository(Database.open(dbFile))
+        val repository = CardTransactionRepository(jdbc)
         val cases = listOf(
             listOf("Idempotency-Key:") to "invalid Idempotency-Key header",
             listOf("Idempotency-Key: ") to "invalid Idempotency-Key header",
@@ -1104,6 +1113,7 @@ class CardTransactionRoutesTest {
     fun `a rejected request does not consume the key`() = withApp {
         val key = UUID.randomUUID().toString()
         assertEquals(HttpStatusCode.BadRequest, postJson(validRequest.replace("1800", "0"), key).status)
+        assertEquals(HttpStatusCode.BadRequest, postJson(validRequest.replace("Lunch", "Lu\\u0000nch"), key).status)
         assertEquals(HttpStatusCode.BadRequest, postJson("{not json", key).status)
         assertEquals(HttpStatusCode.BadRequest, postJson("[$validRequest,${secondRequest.replace("Ramen", " ")}]", key).status)
         val noContentType = client.post("/api/card-transactions") {

@@ -3,6 +3,10 @@ package ai.project.rio.db
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.Statement
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 /**
  * Per-statement JDBC settings, applied to every statement a [JdbcTemplate] prepares. `null` leaves
@@ -35,7 +39,8 @@ class IncorrectResultSizeException(val expectedSize: Int, val actualSize: Int, s
  * they propagate as thrown by the driver.
  *
  * `withTransaction { tx -> ... }` runs the block against one connection with auto-commit off,
- * commits on success and rolls back on any exception. Nested transactions are not supported.
+ * commits on success and rolls back on any exception. `withRollback { tx -> ... }` does the same but
+ * always rolls back, for work whose effects must never be kept. Nested transactions are not supported.
  *
  * `batchUpdate` called directly on the template runs inside its own transaction so the batch is
  * atomic; inside a `withTransaction` block, `tx.batchUpdate` joins the surrounding transaction.
@@ -66,12 +71,17 @@ class JdbcTemplate(
     override fun execute(sql: String) =
         withConnection { it.execute(sql) }
 
-    fun <T> withTransaction(block: (JdbcExecutor) -> T): T =
+    fun <T> withTransaction(block: (JdbcExecutor) -> T): T = inTransaction(commit = true, block)
+
+    /** Runs [block] like [withTransaction], then rolls back even when it returns normally. */
+    fun <T> withRollback(block: (JdbcExecutor) -> T): T = inTransaction(commit = false, block)
+
+    private fun <T> inTransaction(commit: Boolean, block: (JdbcExecutor) -> T): T =
         openConnection().use { conn ->
             conn.autoCommit = false
             try {
                 val result = block(ConnectionExecutor(conn, settings))
-                conn.commit()
+                if (commit) conn.commit() else conn.rollback()
                 result
             } catch (e: Throwable) {
                 try {
@@ -155,9 +165,13 @@ private class ConnectionExecutor(
             is Int -> stmt.setInt(index, value)
             is Long -> stmt.setLong(index, value)
             is Boolean -> stmt.setBoolean(index, value)
+            // pgJDBC cannot bind an Instant; an OffsetDateTime at UTC is a timestamptz whatever the
+            // session time zone. PostgreSQL keeps microseconds and rounds the rest (…:00.9999996Z would
+            // become …:01Z), so the digits it cannot store are cut here instead.
+            is Instant -> stmt.setObject(index, OffsetDateTime.ofInstant(value.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC))
             else -> throw IllegalArgumentException(
                 "Unsupported JDBC parameter type ${value::class.qualifiedName} at index $index. " +
-                    "Convert it to String/Int/Long/Boolean in the repository."
+                    "Convert it to String/Int/Long/Boolean/Instant in the repository."
             )
         }
     }

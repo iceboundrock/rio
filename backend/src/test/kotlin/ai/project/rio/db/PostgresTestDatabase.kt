@@ -1,5 +1,6 @@
 package ai.project.rio.db
 
+import java.sql.Connection
 import java.sql.DriverManager
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -7,7 +8,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 
 /**
  * An empty PostgreSQL database for one test method: [create] it in `@BeforeTest` and [close] it in
- * `@AfterTest`, as the SQLite tests do with a temporary file.
+ * `@AfterTest`.
  *
  * The databases live in one `postgres:17` container per test JVM, started by the first [create] and
  * shared by every test class; Testcontainers' reaper removes it when the JVM exits. Without a Docker
@@ -18,8 +19,14 @@ class PostgresTestDatabase private constructor(private val name: String) : AutoC
     private val url = urlOf(name)
     private val pools = ConcurrentLinkedQueue<PooledDatabase>()
 
+    /** Where this database is, as the application's pool reports it for [SchemaInitializer] messages. */
+    val address: DatabaseAddress = Database.address(url)
+
     /** A new pool on this database, built by [Database.open] as the application builds its own. */
     fun open(): JdbcTemplate = Database.open(url, server.username, server.password).also(pools::add).jdbc
+
+    /** A plain connection outside any pool, for tests that wrap or count connections; the caller closes it. */
+    fun connect(): Connection = DriverManager.getConnection(url, server.username, server.password)
 
     /** Closes every pool [open] built, then drops the database. */
     override fun close() {

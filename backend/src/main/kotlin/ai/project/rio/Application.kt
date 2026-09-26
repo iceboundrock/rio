@@ -9,33 +9,39 @@ import ai.project.rio.http.fastjson2
 import ai.project.rio.cardtransaction.CardTransactionService
 import ai.project.rio.cardtransaction.cardTransactionRoutes
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
-import java.nio.file.Path
 
 /**
  * Entry point. Wiring is done by hand right here; there is no DI container.
  *
- *   RIO_DB_PATH  SQLite file (default data/rio.db)
- *   PORT          HTTP port  (default 8080)
+ *   DB_URL       PostgreSQL JDBC URL (default jdbc:postgresql://localhost:5432/rio, the ./start.sh container)
+ *   DB_USER      role to connect as  (default rio)
+ *   DB_PASSWORD  its password        (default rio)
+ *   PORT         HTTP port           (default 8080)
  */
 fun main() {
-    val dbPath = Path.of(System.getenv("RIO_DB_PATH") ?: "data/rio.db")
+    val url = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/rio"
+    val user = System.getenv("DB_USER") ?: "rio"
+    val password = System.getenv("DB_PASSWORD") ?: "rio"
     val port = System.getenv("PORT")?.toInt() ?: 8080
 
-    dbPath.toAbsolutePath().parent?.toFile()?.mkdirs()
-    val jdbc = Database.open(dbPath)
-    SchemaInitializer.initialize(jdbc, dbPath)
-    SchemaInitializer.seedIfEmpty(jdbc)
+    val database = Database.open(url, user, password)
+    SchemaInitializer.initialize(database.jdbc, database.address)
+    SchemaInitializer.seedIfEmpty(database.jdbc)
 
-    embeddedServer(Netty, port = port) { module(jdbc) }.start(wait = true)
+    embeddedServer(Netty, port = port) {
+        monitor.subscribe(ApplicationStopped) { database.close() }
+        module(database.jdbc)
+    }.start(wait = true)
 }
 
-/** Ktor module. Tests call this directly with a temporary database. */
+/** Ktor module. Tests call this directly with an empty test database. */
 fun Application.module(jdbc: JdbcTemplate) {
     install(ContentNegotiation) {
         fastjson2()

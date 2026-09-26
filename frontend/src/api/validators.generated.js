@@ -612,7 +612,8 @@ return errors === 0;
 validate25.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateCreateCardTransactionRequest = validate27;
-const schema36 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://rio.local/schemas/create-card-transaction-request.schema.json","title":"CreateCardTransactionRequest","type":"object","additionalProperties":false,"required":["description","amount","type"],"properties":{"description":{"type":"string","minLength":1,"pattern":"\\S"},"amount":{"$ref":"money.schema.json#/$defs/positive"},"type":{"type":"string","enum":["CREDIT","DEBIT"]}}};
+const schema36 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://rio.local/schemas/create-card-transaction-request.schema.json","title":"CreateCardTransactionRequest","type":"object","additionalProperties":false,"required":["description","amount","type"],"properties":{"description":{"description":"Not blank, and free of U+0000, which PostgreSQL text cannot store. A schema object takes one pattern, so the second rule is a subschema.","type":"string","minLength":1,"pattern":"\\S","not":{"pattern":"\\u0000"}},"amount":{"$ref":"money.schema.json#/$defs/positive"},"type":{"type":"string","enum":["CREDIT","DEBIT"]}}};
+const pattern8 = new RegExp("\\u0000", "u");
 
 function validate28(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -737,9 +738,11 @@ errors++;
 }
 if(data.description !== undefined){
 let data0 = data.description;
+const _errs4 = errors;
+const _errs5 = errors;
 if(typeof data0 === "string"){
-if(func1(data0) < 1){
-const err4 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(!pattern8.test(data0)){
+const err4 = {};
 if(vErrors === null){
 vErrors = [err4];
 }
@@ -748,8 +751,10 @@ vErrors.push(err4);
 }
 errors++;
 }
-if(!pattern5.test(data0)){
-const err5 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/pattern",keyword:"pattern",params:{pattern: "\\S"},message:"must match pattern \""+"\\S"+"\""};
+}
+var valid1 = _errs5 === errors;
+if(valid1){
+const err5 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/not",keyword:"not",params:{},message:"must NOT be valid"};
 if(vErrors === null){
 vErrors = [err5];
 }
@@ -758,14 +763,46 @@ vErrors.push(err5);
 }
 errors++;
 }
+else {
+errors = _errs4;
+if(vErrors !== null){
+if(_errs4){
+vErrors.length = _errs4;
 }
 else {
-const err6 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+vErrors = null;
+}
+}
+}
+if(typeof data0 === "string"){
+if(func1(data0) < 1){
+const err6 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err6];
 }
 else {
 vErrors.push(err6);
+}
+errors++;
+}
+if(!pattern5.test(data0)){
+const err7 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/pattern",keyword:"pattern",params:{pattern: "\\S"},message:"must match pattern \""+"\\S"+"\""};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+}
+else {
+const err8 = {instancePath:instancePath+"/description",schemaPath:"#/properties/description/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
 }
 errors++;
 }
@@ -779,34 +816,34 @@ errors = vErrors.length;
 if(data.type !== undefined){
 let data2 = data.type;
 if(typeof data2 !== "string"){
-const err7 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err7];
-}
-else {
-vErrors.push(err7);
-}
-errors++;
-}
-if(!((data2 === "CREDIT") || (data2 === "DEBIT"))){
-const err8 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/enum",keyword:"enum",params:{allowedValues: schema36.properties.type.enum},message:"must be equal to one of the allowed values"};
-if(vErrors === null){
-vErrors = [err8];
-}
-else {
-vErrors.push(err8);
-}
-errors++;
-}
-}
-}
-else {
-const err9 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+const err9 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err9];
 }
 else {
 vErrors.push(err9);
+}
+errors++;
+}
+if(!((data2 === "CREDIT") || (data2 === "DEBIT"))){
+const err10 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/enum",keyword:"enum",params:{allowedValues: schema36.properties.type.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+}
+else {
+const err11 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
 }
 errors++;
 }
