@@ -31,12 +31,13 @@ for future code.
 
 | Path | Responsibility |
 |---|---|
-| `backend/` | Kotlin/Ktor application and backend tests |
+| `backend/` | Kotlin/Ktor application and backend tests; `Dockerfile` builds the backend's container image, and `.dockerignore` allowlists its build context |
 | `frontend/` | React/TypeScript application and frontend tests |
 | `contracts/schemas/` | Shared JSON request and response body schemas |
 | `features/` | Work-item specifications |
 | `docs/` | Durable repository conventions and workflow guides |
 | `docker/` | Files mounted into local containers, one directory per database or service; `postgres-rio/` holds `init.sql` for Rio's PostgreSQL |
+| `docker-compose.cdc.yml` | The data pipeline playground's services, one Compose file split into profiles; later phases add their services to it |
 | `README.md` | Setup and current application/API behavior |
 | `verify.sh` | Repository verification run by CI |
 

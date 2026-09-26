@@ -144,6 +144,8 @@ frontend/src/
   components/          CardTransactionList, CardTransactionRow, CreateCardTransactionsForm (one or more rows, all-or-nothing)
 features/              one Markdown spec per interview work item
 docker/postgres-rio/   init.sql: the CDC role, grants and publication, run by the local PostgreSQL container on an empty volume
+docker-compose.cdc.yml the opt-in data pipeline playground (#115), split into Compose profiles; `full` also builds
+                       backend/Dockerfile. ./start.sh does not use it; the commands are in the file's header
 ```
 
 ## API
