@@ -49,16 +49,24 @@ stop_postgres() {
   PG_STARTED=
   echo "==> postgres: docker stop $PG_CONTAINER   (data stays in volume rio-postgres-data)"
   docker stop "$PG_CONTAINER" >/dev/null || true
+  # --rm removes the container ~0.1s after `docker stop` returns. Wait for it, so a reset right after
+  # ./stop.sh doesn't find it mid-removal: `docker rm -f` then fails and the volume survives.
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    docker inspect "$PG_CONTAINER" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
 }
 
 if [ "$(docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null)" = true ]; then
   echo "==> postgres: reusing running container $PG_CONTAINER (left running on exit)"
 else
-  # Loopback only: the password is a fixed local default. wal_level=logical is for the CDC pipeline (#115).
+  # Loopback only: the password is a fixed local default. wal_level=logical and init.sql (the CDC
+  # role, grants and publication; the image runs it only on an empty volume) are for the CDC pipeline (#115).
   echo "==> postgres: docker run $PG_CONTAINER   (127.0.0.1:5432, volume rio-postgres-data)"
   docker run -d --rm --name "$PG_CONTAINER" \
     -p 127.0.0.1:5432:5432 \
     -v rio-postgres-data:/var/lib/postgresql/data \
+    -v "$PWD/docker/postgres-rio/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" \
     -e POSTGRES_USER=rio -e POSTGRES_PASSWORD=rio -e POSTGRES_DB=rio \
     "$PG_IMAGE" -c wal_level=logical >/dev/null
   PG_STARTED=1
