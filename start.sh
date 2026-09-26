@@ -49,6 +49,12 @@ stop_postgres() {
   PG_STARTED=
   echo "==> postgres: docker stop $PG_CONTAINER   (data stays in volume rio-postgres-data)"
   docker stop "$PG_CONTAINER" >/dev/null || true
+  # --rm removes the container ~0.1s after `docker stop` returns. Wait for it, so a reset right after
+  # ./stop.sh doesn't find it mid-removal: `docker rm -f` then fails and the volume survives.
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    docker inspect "$PG_CONTAINER" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
 }
 
 if [ "$(docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null)" = true ]; then
