@@ -9,6 +9,13 @@
 # and leaves everything running. `down` keeps the volumes, so the next `up` resumes where it stopped;
 # `down -v` resets Rio's data and Kafka together.
 #
+# A service's depends_on targets are in every profile the service is in (so `kafka` is in `cdc`):
+# Compose rejects the whole project, for every command, when an active service depends on an inactive
+# one. Each profile, and so any combination of them, is then a valid project; ./verify.sh checks it.
+#
+# Needs Docker Compose 2.20.2 or later, the first to accept `start_interval`. Docker Engine older than 25
+# ignores that setting, so Kafka and Connect report healthy up to 30 s later.
+#
 # In `full`, the UI still runs on the host: `cd frontend && pnpm run dev`, whose proxy sends /api to :8080.
 # postgres-rio and ./start.sh's rio-postgres both publish 127.0.0.1:5432, and rio-backend and ./start.sh's
 # backend both use :8080, so run one setup at a time (./stop.sh first). Every port is published on
@@ -46,7 +53,7 @@ services:
 
   kafka:
     image: apache/kafka:4.3.1
-    profiles: [infra, full]
+    profiles: [infra, cdc, full]
     environment:
       # One node that is both broker and KRaft controller; there is no ZooKeeper.
       KAFKA_NODE_ID: 1
@@ -66,8 +73,8 @@ services:
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
       KAFKA_LOG_DIRS: /var/lib/kafka/data
-      # The volume is formatted for this id and refuses any other, so it is fixed here rather than left
-      # to the image's default.
+      # The volume is formatted for this id and refuses any other. The image's default is a fixed id too,
+      # but it is the image's to change, and an image bump that changed it would lock out the volume.
       CLUSTER_ID: 7qizwwLGRlacX1iBY-YpmQ
     ports:
       - "127.0.0.1:9092:9092"

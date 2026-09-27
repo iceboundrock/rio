@@ -1,11 +1,24 @@
 #!/bin/sh
-# Runs everything CI would: backend tests, frontend tests, frontend production build.
+# Runs everything CI would: the compose file check, backend tests, frontend tests, frontend production build.
 # Requires: JDK 25, Node 24 (>=24.21.0, the current LTS), pnpm (the version pinned by `packageManager` in
-# frontend/package.json; `corepack enable pnpm` provides it), and a running Docker daemon, because backend
-# tests start PostgreSQL in a container through Testcontainers. Nothing here is needed to run the app itself.
+# frontend/package.json; `corepack enable pnpm` provides it), a running Docker daemon, because backend
+# tests start PostgreSQL in a container through Testcontainers, and Docker Compose 2.20.2 or later.
+# Nothing here is needed to run the app itself.
 set -eu
 
 cd "$(dirname "$0")"
+
+# docker-compose.cdc.yml is otherwise read only by a manual `up`. Compose rejects a profile whose service
+# depends on one outside it, and `--profile '*'` would hide that, so each profile is loaded on its own;
+# any combination of valid profiles is valid. The assignment makes an unparsable file fail here.
+echo "==> docker-compose.cdc.yml: docker compose config, once per profile"
+profiles="$(docker compose -f docker-compose.cdc.yml config --profiles)"
+for profile in $profiles; do
+  docker compose -f docker-compose.cdc.yml --profile "$profile" config --quiet || {
+    echo "error: docker-compose.cdc.yml is invalid with only --profile $profile" >&2
+    exit 1
+  }
+done
 
 echo "==> backend: ./gradlew test"
 (cd backend && ./gradlew test --quiet)

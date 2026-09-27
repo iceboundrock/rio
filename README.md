@@ -97,6 +97,10 @@ fails when they do not match the schemas, and runs the frontend tests with Node'
 `--disallow-code-generation-from-strings` so any return to runtime schema compilation (`eval` /
 `new Function`, which a strict CSP forbids) fails there instead of in a browser.
 
+`./verify.sh` also loads `docker-compose.cdc.yml` once per profile with `docker compose config`, which
+starts nothing. It fails on YAML or schema mistakes, and when a service depends on one missing from one
+of its profiles, which Compose rejects with `depends on undefined service`.
+
 ### Continuous integration
 
 `.github/workflows/verify.yml` runs `./verify.sh` on every pull request and on pushes to
