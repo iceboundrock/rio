@@ -28,7 +28,7 @@ deprecation periods. Document breaking changes in the PR description and move on
 | `contracts/schemas/` | JSON Schema for application JSON request and response bodies | `contracts/AGENTS.md` |
 | `features/` | One Markdown spec per work item; agree on it before implementing | `features/README.md` |
 | `docker/` | Files mounted into local containers; `postgres-rio/init.sql` sets up CDC (role, grants, publication) on Rio's PostgreSQL. No table DDL: `db/SchemaInitializer.kt` owns it | this file |
-| `docker-compose.cdc.yml` | The opt-in data pipeline playground (#115); `./start.sh` does not use it. Every service has a healthcheck, a profile, and a pinned image tag (never `latest`) or a `build:` whose Dockerfile pins its `FROM`s the same way, and is also in `full`; a service's `depends_on` targets are in every profile the service is in (`./verify.sh` checks this); ports are published on `127.0.0.1` only | this file |
+| `docker-compose.cdc.yml` | The opt-in data pipeline playground (#115); `./start.sh` does not use it. Every service has a profile, a healthcheck whose `start_period` covers its startup, and a pinned image tag (never `latest`) or a `build:` whose Dockerfile pins its `FROM`s the same way. Every service is also in `full`, and its `depends_on` targets are in every profile it is in; `./verify.sh` checks both. Ports are published on `127.0.0.1` only | this file |
 
 ## File placement
 

@@ -4,17 +4,22 @@
 #   docker compose -f docker-compose.cdc.yml --profile infra --profile cdc up -d   # PostgreSQL, Kafka, Kafka Connect
 #   docker compose -f docker-compose.cdc.yml --profile full up -d --build          # the same plus Rio's backend
 #   docker compose -f docker-compose.cdc.yml --profile '*' down                    # stop and remove all of it
+#   docker compose -f docker-compose.cdc.yml --profile '*' down -v                 # the same, and delete the data
 #
-# A command that names neither a profile nor a service skips every service here: a bare `down` exits 0
-# and leaves everything running. `down` keeps the volumes, so the next `up` resumes where it stopped;
-# `down -v` resets Rio's data and Kafka together.
+# A command that names neither a profile nor a service skips every service here: a bare `down` or
+# `down -v` exits 0 and leaves everything running. Without -v the volumes stay, so the next `up` resumes
+# where it stopped. With it, Rio's rows and Kafka's topics are deleted together, which is also the reset
+# after a schema change.
 #
 # A service's depends_on targets are in every profile the service is in (so `kafka` is in `cdc`):
 # Compose rejects the whole project, for every command, when an active service depends on an inactive
 # one. Each profile, and so any combination of them, is then a valid project; ./verify.sh checks it.
 #
 # Needs Docker Compose 2.20.2 or later, the first to accept `start_interval`. Docker Engine older than 25
-# ignores that setting, so Kafka and Connect report healthy up to 30 s later.
+# ignores that setting and checks at `interval` from the start, so a service reports healthy up to one
+# interval later: 30 s for Kafka and Connect. A healthcheck's start_period is how long its service may
+# take to start (an empty volume, a cold JVM): failed checks in it don't count against retries, which are
+# left to notice a service that stops answering later.
 #
 # In `full`, the UI still runs on the host: `cd frontend && pnpm run dev`, whose proxy sends /api to :8080.
 # postgres-rio and ./start.sh's rio-postgres both publish 127.0.0.1:5432, and rio-backend and ./start.sh's
@@ -47,9 +52,11 @@ services:
       # Over TCP: while it initializes an empty volume, the image runs a temporary server that listens
       # on the socket only and is then restarted.
       test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-U", "rio", "-d", "rio"]
+      start_period: 120s
+      start_interval: 1s
       interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 3
 
   kafka:
     image: apache/kafka:4.3.1
@@ -136,9 +143,11 @@ services:
       # A TCP connect, not an HTTP request, which the backend would log every time. main() opens the port
       # only after the schema check and seeding, so an open port means it is ready.
       test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8080"]
+      start_period: 120s
+      start_interval: 1s
       interval: 5s
       timeout: 5s
-      retries: 24
+      retries: 3
 
 volumes:
   postgres-rio-data:

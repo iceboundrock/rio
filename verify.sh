@@ -8,14 +8,30 @@ set -eu
 
 cd "$(dirname "$0")"
 
-# docker-compose.cdc.yml is otherwise read only by a manual `up`. Compose rejects a profile whose service
-# depends on one outside it, and `--profile '*'` would hide that, so each profile is loaded on its own;
-# any combination of valid profiles is valid. The assignment makes an unparsable file fail here.
-echo "==> docker-compose.cdc.yml: docker compose config, once per profile"
+# docker-compose.cdc.yml is otherwise read only by a manual `up`.
+echo "==> docker-compose.cdc.yml: docker compose config, once per profile; full has every service"
+# Without the Compose plugin, the Docker CLI reads `compose -f` as its own flags and fails with
+# "unknown shorthand flag", which does not say what is missing.
+docker compose version >/dev/null || {
+  echo "error: ./verify.sh needs Docker Compose 2.20.2 or later, and \`docker compose version\` fails" >&2
+  exit 1
+}
+# Compose rejects a profile whose service depends on one outside it, and `--profile '*'` would hide that,
+# so each profile is loaded on its own; any combination of valid profiles is valid. The assignment makes
+# an unparsable file fail here.
 profiles="$(docker compose -f docker-compose.cdc.yml config --profiles)"
 for profile in $profiles; do
   docker compose -f docker-compose.cdc.yml --profile "$profile" config --quiet || {
     echo "error: docker-compose.cdc.yml is invalid with only --profile $profile" >&2
+    exit 1
+  }
+done
+# The header's `--profile full up` is the whole playground, so every service is in `full`.
+services="$(docker compose -f docker-compose.cdc.yml --profile '*' config --services)"
+full_services="$(docker compose -f docker-compose.cdc.yml --profile full config --services)"
+for service in $services; do
+  printf '%s\n' "$full_services" | grep -qxF "$service" || {
+    echo "error: service $service in docker-compose.cdc.yml is not in profile full" >&2
     exit 1
   }
 done

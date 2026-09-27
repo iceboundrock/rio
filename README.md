@@ -10,7 +10,7 @@ schemas, and types may be renamed freely, and an existing local database is simp
 
 ## Quick start
 
-Prerequisites: Docker (a running daemon: the backend's database runs in a container, and so do the backend tests, see [Tests and verification](#tests-and-verification)), JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash).
+Prerequisites: Docker (a running daemon: the backend's database runs in a container, and so do the backend tests, see [Tests and verification](#tests-and-verification); `./verify.sh` also needs Docker Compose 2.20.2 or later), JDK 25 (the default Gradle toolchain; CI also covers 21 and 17, see below), Node `>=24.21.0 <25.0.0` (only the current LTS line is supported, see #71) and pnpm (the version is pinned by `packageManager` in `frontend/package.json`; `corepack enable pnpm` installs it, see #74; bump it with `corepack use pnpm@<version>`, which also refreshes the integrity hash).
 
 ```bash
 ./start.sh               # PostgreSQL, backend and frontend at once; Ctrl+C stops all three
@@ -75,6 +75,10 @@ left alone. If `--rm` already removed it, `docker rm -f` still exits 0 (Docker 2
 `docker volume rm` runs. On the next start the image initializes the empty volume and runs `init.sql`
 again, and the backend creates the tables and seeds the 9 card transactions.
 
+The data pipeline playground's `postgres-rio` has its own volume. Its reset is
+`docker compose -f docker-compose.cdc.yml --profile '*' down -v`, which deletes Kafka's topics along with
+Rio's data; without `--profile '*'` it removes nothing (see the file's header).
+
 ## Tests and verification
 
 ```bash
@@ -98,8 +102,11 @@ fails when they do not match the schemas, and runs the frontend tests with Node'
 `new Function`, which a strict CSP forbids) fails there instead of in a browser.
 
 `./verify.sh` also loads `docker-compose.cdc.yml` once per profile with `docker compose config`, which
-starts nothing. It fails on YAML or schema mistakes, and when a service depends on one missing from one
-of its profiles, which Compose rejects with `depends on undefined service`.
+starts nothing. It fails on YAML or schema mistakes, on a service that depends on one missing from one of
+its profiles (Compose's `depends on undefined service`), and on a service that is not in the `full`
+profile. This step needs Docker Compose 2.20.2 or later, which is a plugin separate from the
+Docker CLI: Docker Desktop includes it, but some Linux installs do not. `docker compose version` shows
+whether you have it.
 
 ### Continuous integration
 
