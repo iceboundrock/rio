@@ -1,0 +1,9 @@
+# Allowlist: only what `./gradlew installDist` reads. Host state (build/, .gradle/, .kotlin/, data/)
+# must not reach the image, and test sources would only invalidate the build cache.
+*
+!gradlew
+!gradle/wrapper/
+!build.gradle.kts
+!settings.gradle.kts
+!gradle.properties
+!src/main/

@@ -26,7 +26,8 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 PG_CONTAINER=rio-postgres
-# postgres:17 is also the image the backend tests use (PostgresTestDatabase); bump both together.
+# postgres:17 is also the image of the backend tests (PostgresTestDatabase) and of postgres-rio in
+# docker-compose.cdc.yml; bump them together.
 PG_IMAGE=postgres:17
 PG_STARTED=
 
