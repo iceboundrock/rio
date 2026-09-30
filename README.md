@@ -103,8 +103,8 @@ fails when they do not match the schemas, and runs the frontend tests with Node'
 
 `./verify.sh` also loads `docker-compose.cdc.yml` once per profile with `docker compose config`, which
 starts nothing. It fails on YAML or schema mistakes, on a service that depends on one missing from one of
-its profiles (Compose's `depends on undefined service`), and on a service that is not in the `full`
-profile. This step needs Docker Compose 2.20.2 or later, which is a plugin separate from the
+its profiles (Compose's `depends on undefined service`), and on a service that has no profile or is not in
+the `full` profile. This step needs Docker Compose 2.20.2 or later, which is a plugin separate from the
 Docker CLI: Docker Desktop includes it, but some Linux installs do not. `docker compose version` shows
 whether you have it.
 

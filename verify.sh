@@ -9,7 +9,7 @@ set -eu
 cd "$(dirname "$0")"
 
 # docker-compose.cdc.yml is otherwise read only by a manual `up`.
-echo "==> docker-compose.cdc.yml: docker compose config, once per profile; full has every service"
+echo "==> docker-compose.cdc.yml: docker compose config, once per profile; every service has a profile and is in full"
 # Without the Compose plugin, the Docker CLI reads `compose -f` as its own flags and fails with
 # "unknown shorthand flag", which does not say what is missing.
 docker compose version >/dev/null || {
@@ -18,10 +18,11 @@ docker compose version >/dev/null || {
 }
 # Compose rejects a profile whose service depends on one outside it, and `--profile '*'` would hide that,
 # so each profile is loaded on its own; any combination of valid profiles is valid. The assignment makes
-# an unparsable file fail here.
+# an unparsable file fail here. `config --services`, because before Compose 2.26 `config --quiet` accepts
+# such a profile, which `up` then refuses.
 profiles="$(docker compose -f docker-compose.cdc.yml config --profiles)"
 for profile in $profiles; do
-  docker compose -f docker-compose.cdc.yml --profile "$profile" config --quiet || {
+  docker compose -f docker-compose.cdc.yml --profile "$profile" config --services >/dev/null || {
     echo "error: docker-compose.cdc.yml is invalid with only --profile $profile" >&2
     exit 1
   }
@@ -34,6 +35,13 @@ for service in $services; do
     echo "error: service $service in docker-compose.cdc.yml is not in profile full" >&2
     exit 1
   }
+done
+# The header's bare `down` skips every service only if every service has a profile, so with no profile
+# active, nothing is listed. An exported COMPOSE_PROFILES would activate its profiles, so it is emptied.
+unprofiled="$(COMPOSE_PROFILES= docker compose -f docker-compose.cdc.yml config --services)"
+for service in $unprofiled; do
+  echo "error: service $service in docker-compose.cdc.yml has no profile" >&2
+  exit 1
 done
 
 echo "==> backend: ./gradlew test"

@@ -15,11 +15,12 @@
 # Compose rejects the whole project, for every command, when an active service depends on an inactive
 # one. Each profile, and so any combination of them, is then a valid project; ./verify.sh checks it.
 #
-# Needs Docker Compose 2.20.2 or later, the first to accept `start_interval`. Docker Engine older than 25
-# ignores that setting and checks at `interval` from the start, so a service reports healthy up to one
-# interval later: 30 s for Kafka and Connect. A healthcheck's start_period is how long its service may
-# take to start (an empty volume, a cold JVM): failed checks in it don't count against retries, which are
-# left to notice a service that stops answering later.
+# Needs Docker Compose 2.20.2 or later, the first to accept `start_interval`, which takes effect only with
+# Compose 2.24.0 or later on Docker Engine 25 or later. With an older Compose or Engine, a service reports
+# healthy up to one interval later, 30 s for Kafka and Connect, except that on an Engine older than 25,
+# Compose 2.24.0 to 5.0.2 refuse to create these services. A healthcheck's start_period is how long its
+# service may take to start (an empty volume, a cold JVM): failed checks in it don't count against
+# retries, which are left to notice a service that stops answering later.
 #
 # In `full`, the UI still runs on the host: `cd frontend && pnpm run dev`, whose proxy sends /api to :8080.
 # postgres-rio and ./start.sh's rio-postgres both publish 127.0.0.1:5432, and rio-backend and ./start.sh's
